@@ -244,11 +244,25 @@ impl Entities {
         extensions: &Extensions<'_>,
     ) -> Result<Self> {
         let checker = schema.map(|schema| EntitySchemaConformanceChecker::new(schema, extensions));
+        let collection: Vec<Arc<Entity>> = collection.into_iter().collect();
+        // Only the last version of an entity given more than once is applied.
+        // Overwriting an earlier version from this same collection would strip
+        // only that version's parents from its descendants, as its transitive
+        // closure is not computed yet, and leave stale ancestors behind.
+        let last_version: HashMap<&EntityUID, usize> = collection
+            .iter()
+            .enumerate()
+            .map(|(i, entity)| (entity.uid(), i))
+            .collect();
         let mut entities_touched: HashSet<EntityUID> = HashSet::new();
-        for entity in collection.into_iter() {
+        for (i, entity) in collection.iter().enumerate() {
             if let Some(checker) = checker.as_ref() {
-                checker.validate_entity(&entity)?;
+                checker.validate_entity(entity)?;
             }
+            if last_version.get(entity.uid()) != Some(&i) {
+                continue;
+            }
+            let entity = Arc::clone(entity);
             let uid = entity.uid().clone();
             // If overwriting an existing entity, strip stale TC edges from its descendants
             if let Some(old_entity) = self.entities.get(&uid) {
@@ -2572,6 +2586,59 @@ mod entities_tests {
 
         // Assert that there is no longer an edge from F to E
         assert!(!f.is_descendant_of(&eid));
+    }
+
+    #[test]
+    fn upsert_entities_repeated_in_batch() {
+        // Original Hierarchy
+        // A -> T -> O (O is not an entity in the store)
+        // A -> T -> G -> R
+        let aid = EntityUID::with_eid("A");
+        let tid = EntityUID::with_eid("T");
+        let oid = EntityUID::with_eid("O");
+        let gid = EntityUID::with_eid("G");
+        let rid = EntityUID::with_eid("R");
+        let mut a = Entity::with_uid(aid.clone());
+        a.add_parent(tid.clone());
+        let mut t = Entity::with_uid(tid);
+        t.add_parent(oid.clone());
+        t.add_parent(gid.clone());
+        let mut g = Entity::with_uid(gid.clone());
+        g.add_parent(rid.clone());
+
+        // One batch: O -> G, then O with no parents (the latest version wins),
+        // and G with no parents
+        let mut o_first = Entity::with_uid(oid.clone());
+        o_first.add_parent(gid.clone());
+        let updates = vec![
+            o_first,
+            Entity::with_uid(oid),
+            Entity::with_uid(gid.clone()),
+        ]
+        .into_iter()
+        .map(Arc::new)
+        .collect::<Vec<_>>();
+        let entities = Entities::from_entities(
+            vec![a, t, g],
+            None::<&NoEntitiesSchema>,
+            TCComputation::ComputeNow,
+            Extensions::all_available(),
+        )
+        .expect("Failed to construct entities")
+        .upsert_entities(
+            updates,
+            None::<&NoEntitiesSchema>,
+            TCComputation::ComputeNow,
+            Extensions::all_available(),
+        )
+        .expect("Failed to upsert entities");
+        // Post-Update Hierarchy
+        // A -> T -> O, A -> T -> G
+
+        let a = entities.entity(&aid).unwrap();
+        assert!(a.is_descendant_of(&gid));
+        // Assert that there is no longer a path from A to R
+        assert!(!a.is_descendant_of(&rid));
     }
 
     // ---- Vec-of-test-cases for add/remove/upsert with TC repair ----
