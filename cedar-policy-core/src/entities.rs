@@ -395,11 +395,29 @@ impl Entities {
     }
 
     /// Internal helper function to convert this `Entities` into a `Vec<EntityJson>`
+    ///
+    /// Each entity lists its direct parents, plus any indirect ancestor that
+    /// is not an ancestor of one of those parents in this `Entities` (e.g., if
+    /// a parent is not in this `Entities`). For an acyclic hierarchy, computing
+    /// the transitive closure of the result gives back the same ancestors.
     fn to_ejsons(&self) -> Result<Vec<EntityJson>> {
         self.entities
             .values()
-            .map(Arc::as_ref)
-            .map(EntityJson::from_entity)
+            .map(|entity| {
+                let reachable_through_parent = |ancestor: &EntityUID| {
+                    entity.parents().any(|parent| {
+                        self.entities
+                            .get(parent)
+                            .is_some_and(|parent| parent.is_descendant_of(ancestor))
+                    })
+                };
+                let parents = entity.parents().chain(
+                    entity
+                        .indirect_ancestors()
+                        .filter(|ancestor| !reachable_through_parent(ancestor)),
+                );
+                EntityJson::from_entity_with_parents(entity, parents)
+            })
             .collect::<std::result::Result<_, JsonSerializationError>>()
             .map_err(Into::into)
     }
@@ -2286,6 +2304,47 @@ mod json_parsing_tests {
         let y = x.unwrap().to_json_value();
         // Should not error on reserialization
         y.unwrap();
+    }
+
+    /// Indirect ancestors that cannot be reached through a parent stored in
+    /// the `Entities` are kept when serializing (#2341)
+    #[test]
+    fn serialize_keeps_unreachable_indirect_ancestors() {
+        // A -> B -> C -> D, where B is not in the store
+        let cid = EntityUID::with_eid("C");
+        let did = EntityUID::with_eid("D");
+        let mut a = Entity::with_uid(EntityUID::with_eid("A"));
+        a.add_parent(EntityUID::with_eid("B"));
+        a.add_indirect_ancestor(cid.clone());
+        a.add_indirect_ancestor(did.clone());
+        let mut c = Entity::with_uid(cid);
+        c.add_parent(did);
+        let entities = Entities::from_entities(
+            [a, c],
+            None::<&NoEntitiesSchema>,
+            TCComputation::EnforceAlreadyComputed,
+            Extensions::all_available(),
+        )
+        .unwrap();
+        let json = entities.to_json_value().unwrap();
+        // C and D are not reachable through B, which is not in the store
+        let a_json = json
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["uid"]["id"] == "A")
+            .unwrap();
+        let parents: HashSet<&str> = a_json["parents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(parents, HashSet::from(["B", "C", "D"]));
+        let parser: EntityJsonParser<'_, '_> =
+            EntityJsonParser::new(None, Extensions::all_available(), TCComputation::ComputeNow);
+        let reparsed = parser.from_json_value(json).unwrap();
+        assert_deep_eq!(reparsed, entities);
     }
 }
 

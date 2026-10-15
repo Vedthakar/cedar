@@ -449,6 +449,15 @@ impl EntityJson {
     ///
     /// (for the reverse transformation, use `EntityJsonParser`)
     pub fn from_entity(entity: &Entity) -> Result<Self, JsonSerializationError> {
+        Self::from_entity_with_parents(entity, entity.ancestors())
+    }
+
+    /// Convert an `Entity` into an `EntityJson`, emitting `parents` as its
+    /// parents rather than all of its ancestors
+    pub(crate) fn from_entity_with_parents<'a>(
+        entity: &Entity,
+        parents: impl Iterator<Item = &'a EntityUID>,
+    ) -> Result<Self, JsonSerializationError> {
         let serialize_kpvalue = |(k, pvalue): (&SmolStr, &PartialValue)| -> Result<_, _> {
             Ok((k.clone(), serialize_pvalue(pvalue)?))
         };
@@ -459,8 +468,7 @@ impl EntityJson {
                 .attrs()
                 .map(serialize_kpvalue)
                 .collect::<Result<_, JsonSerializationError>>()?,
-            parents: entity
-                .ancestors()
+            parents: parents
                 .map(|euid| EntityUidJson::ImplicitEntityEscape(TypeAndId::from(euid.clone())))
                 .collect(),
             tags: entity

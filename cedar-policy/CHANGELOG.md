@@ -25,6 +25,14 @@ Cedar Language Version: TBD
   optimization was applied to `from_normalized_str()` for `InternalName`, `UnreservedId` and `AnyId`.
 - Remove support for policy templates in the deprecated `entity-manifest` feature. Policy templates
   were previously accepted, but slots were not included in the manifest.
+- `Entities::to_json_value()` and `Entities::write_to_json()` now emit each entity's parents rather than all of
+  its ancestors, so the output matches the hierarchy the entities were built from. An indirect
+  ancestor is still emitted when it cannot be reached through a parent in the `Entities`. Because serialized
+  `parents` are no longer the full set of ancestors, anything that reads this JSON must now compute the
+  transitive closure itself, as `Entities::from_json_*` does by default; re-parsing with
+  `TCComputation::AssumeAlreadyComputed` or `EnforceAlreadyComputed` no longer gives the full ancestors. For an
+  acyclic hierarchy, computing the closure of the output gives back the same ancestors. `Entity::to_json_value()`
+  is unchanged (#2341).
 
 ## [4.13.0] - 2026-09-15
 
