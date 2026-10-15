@@ -25,6 +25,8 @@ Cedar Language Version: TBD
   optimization was applied to `from_normalized_str()` for `InternalName`, `UnreservedId` and `AnyId`.
 - Remove support for policy templates in the deprecated `entity-manifest` feature. Policy templates
   were previously accepted, but slots were not included in the manifest.
+- Validating a large policy set with many errors is faster, as hashing a source location no longer hashes the
+  whole policy text (previously quadratic) (#2598).
 
 ## [4.13.0] - 2026-09-15
 
