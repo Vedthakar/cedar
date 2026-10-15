@@ -26,6 +26,12 @@ Cedar Language Version: TBD
 - Remove support for policy templates in the deprecated `entity-manifest` feature. Policy templates
   were previously accepted, but slots were not included in the manifest.
 
+### Fixed
+
+- Fixed `Entities::upsert_entities` keeping stale ancestors when the same entity is given more than once.
+  An entity could keep an ancestor that the update removed, so that `in` remained true. Only the last
+  version of each entity is now applied, as documented (#2606, introduced in 4.11.0).
+
 ## [4.13.0] - 2026-09-15
 
 Cedar Language Version: 4.5
