@@ -12275,3 +12275,95 @@ mod tolerant_ast_tests {
         let _ = policy.action_constraint();
     }
 }
+
+mod issue_2341 {
+    //! Serializing `Entities` to JSON emits each entity's parents, not all of
+    //! its ancestors.
+    use super::*;
+
+    /// Parent ids of `id` in the entities JSON `json`
+    fn parents_in_json(json: &serde_json::Value, id: &str) -> HashSet<String> {
+        json.as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["uid"]["id"] == id)
+            .unwrap()["parents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["id"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    fn entities() -> Entities {
+        // a -> b -> c, and a -> d -> c
+        Entities::from_json_value(
+            serde_json::json!([
+                { "uid": { "type": "E", "id": "a" }, "attrs": {}, "parents": [
+                    { "type": "E", "id": "b" }, { "type": "E", "id": "d" }
+                ] },
+                { "uid": { "type": "E", "id": "b" }, "attrs": {}, "parents": [
+                    { "type": "E", "id": "c" }
+                ] },
+                { "uid": { "type": "E", "id": "d" }, "attrs": {}, "parents": [
+                    { "type": "E", "id": "c" }
+                ] },
+                { "uid": { "type": "E", "id": "c" }, "attrs": {}, "parents": [] }
+            ]),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn to_json_value_emits_parents() {
+        let json = entities().to_json_value().unwrap();
+        assert_eq!(
+            parents_in_json(&json, "a"),
+            HashSet::from(["b".to_string(), "d".to_string()])
+        );
+        assert_eq!(
+            parents_in_json(&json, "b"),
+            HashSet::from(["c".to_string()])
+        );
+        assert_eq!(parents_in_json(&json, "c"), HashSet::new());
+    }
+
+    #[test]
+    fn write_to_json_emits_parents() {
+        let mut buf = Vec::new();
+        entities().write_to_json(&mut buf).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(
+            parents_in_json(&json, "a"),
+            HashSet::from(["b".to_string(), "d".to_string()])
+        );
+    }
+
+    #[test]
+    fn round_trip() {
+        let entities = entities();
+        let json = entities.to_json_value().unwrap();
+        let reparsed = Entities::from_json_value(json, None).unwrap();
+        assert!(reparsed.deep_eq(&entities));
+        let a = EntityUid::from_strs("E", "a");
+        let ancestors: HashSet<&EntityUid> = reparsed.ancestors(&a).unwrap().collect();
+        assert!(ancestors.contains(&EntityUid::from_strs("E", "c")));
+    }
+
+    #[test]
+    fn single_entity_keeps_ancestors() {
+        // A single entity is serialized on its own, so it keeps all of its
+        // ancestors
+        let entities = entities();
+        let a = entities.get(&EntityUid::from_strs("E", "a")).unwrap();
+        let json = a.to_json_value().unwrap();
+        let parents: HashSet<&str> = json["parents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(parents, HashSet::from(["b", "c", "d"]));
+    }
+}
