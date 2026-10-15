@@ -25,6 +25,7 @@ Cedar Language Version: TBD
   optimization was applied to `from_normalized_str()` for `InternalName`, `UnreservedId` and `AnyId`.
 - Remove support for policy templates in the deprecated `entity-manifest` feature. Policy templates
   were previously accepted, but slots were not included in the manifest.
+- Validating `action in [...]` is faster for schemas with large action groups (#2586).
 
 ## [4.13.0] - 2026-09-15
 
