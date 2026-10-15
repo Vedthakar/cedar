@@ -30,7 +30,7 @@ Cedar Language Version: TBD
 
 - Fixed `Entities::upsert_entities` keeping stale ancestors when the same entity is given more than once.
   An entity could keep an ancestor that the update removed, so that `in` remained true. Only the last
-  version of each entity is now applied, as documented (introduced in 4.11.0).
+  version of each entity is now applied, as documented (#2606, introduced in 4.11.0).
 
 ## [4.13.0] - 2026-09-15
 

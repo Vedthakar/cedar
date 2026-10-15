@@ -12275,3 +12275,149 @@ mod tolerant_ast_tests {
         let _ = policy.action_constraint();
     }
 }
+
+mod issue_2606 {
+    //! When `upsert_entities` is given the same entity more than once, only
+    //! the last version is applied, and no stale ancestor is left behind.
+    use super::*;
+    use cool_asserts::assert_matches;
+    use entities::err::EntitiesError;
+
+    fn uid(ty: &str, id: &str) -> EntityUid {
+        EntityUid::from_strs(ty, id)
+    }
+
+    fn entity(uid: EntityUid, parents: &[EntityUid]) -> Entity {
+        Entity::new_no_attrs(uid, parents.iter().cloned().collect())
+    }
+
+    /// alice -> team -> org (not stored), and team -> admins -> root
+    fn initial_entities() -> Entities {
+        Entities::from_entities(
+            [
+                entity(uid("User", "alice"), &[uid("Team", "team")]),
+                entity(
+                    uid("Team", "team"),
+                    &[uid("Org", "o"), uid("Group", "admins")],
+                ),
+                entity(uid("Group", "admins"), &[uid("Group", "root")]),
+            ],
+            None,
+        )
+        .unwrap()
+    }
+
+    fn is_authorized(entities: &Entities) -> Decision {
+        let policies: PolicySet = r#"permit(principal in Group::"root", action, resource);"#
+            .parse()
+            .unwrap();
+        let request = Request::new(
+            uid("User", "alice"),
+            uid("Action", "view"),
+            uid("Doc", "d"),
+            Context::empty(),
+            None,
+        )
+        .unwrap();
+        Authorizer::new()
+            .is_authorized(&request, &policies, entities)
+            .decision()
+    }
+
+    #[test]
+    fn revoked_ancestor_is_removed() {
+        let entities = initial_entities();
+        assert_eq!(is_authorized(&entities), Decision::Allow);
+        // `Org::"o"` is given twice, and `Group::"admins"` is taken out of root
+        let entities = entities
+            .upsert_entities(
+                [
+                    entity(uid("Org", "o"), &[uid("Group", "admins")]),
+                    entity(uid("Org", "o"), &[]),
+                    entity(uid("Group", "admins"), &[]),
+                ],
+                None,
+            )
+            .unwrap();
+        let alice = uid("User", "alice");
+        let ancestors: HashSet<&EntityUid> = entities.ancestors(&alice).unwrap().collect();
+        assert_eq!(
+            ancestors,
+            HashSet::from([
+                &uid("Team", "team"),
+                &uid("Org", "o"),
+                &uid("Group", "admins")
+            ])
+        );
+        assert_eq!(is_authorized(&entities), Decision::Deny);
+    }
+
+    #[test]
+    fn last_version_wins() {
+        // The first version of `Org::"o"` has a parent, the last one does not
+        let entities = initial_entities()
+            .upsert_entities(
+                [
+                    entity(uid("Org", "o"), &[uid("Group", "root")]),
+                    entity(uid("Org", "o"), &[]),
+                    entity(uid("Group", "admins"), &[]),
+                ],
+                None,
+            )
+            .unwrap();
+        assert_eq!(is_authorized(&entities), Decision::Deny);
+        // And the other way around
+        let entities = initial_entities()
+            .upsert_entities(
+                [
+                    entity(uid("Org", "o"), &[]),
+                    entity(uid("Org", "o"), &[uid("Group", "root")]),
+                    entity(uid("Group", "admins"), &[]),
+                ],
+                None,
+            )
+            .unwrap();
+        assert_eq!(is_authorized(&entities), Decision::Allow);
+    }
+
+    #[test]
+    fn repeated_stored_entity_with_descendants() {
+        // `Team::"team"` is already stored, with descendant `User::"alice"`,
+        // and both versions replace it: the first keeps `Group::"admins"`,
+        // the last drops every parent
+        let entities = initial_entities()
+            .upsert_entities(
+                [
+                    entity(uid("Team", "team"), &[uid("Group", "admins")]),
+                    entity(uid("Team", "team"), &[]),
+                ],
+                None,
+            )
+            .unwrap();
+        let alice = uid("User", "alice");
+        let ancestors: HashSet<&EntityUid> = entities.ancestors(&alice).unwrap().collect();
+        assert_eq!(ancestors, HashSet::from([&uid("Team", "team")]));
+        assert_eq!(is_authorized(&entities), Decision::Deny);
+    }
+
+    #[test]
+    fn earlier_version_is_still_validated() {
+        let schema: Schema = r"
+            entity Group;
+            entity User in [Group];
+            action view appliesTo { principal: User, resource: User };
+        "
+        .parse()
+        .unwrap();
+        // The first version of `User::"alice"` has a parent of a type the
+        // schema does not allow, even though the last version is valid
+        let result = Entities::empty().upsert_entities(
+            [
+                entity(uid("User", "alice"), &[uid("User", "bob")]),
+                entity(uid("User", "alice"), &[uid("Group", "g")]),
+            ],
+            Some(&schema),
+        );
+        assert_matches!(result, Err(EntitiesError::InvalidEntity(_)));
+    }
+}
