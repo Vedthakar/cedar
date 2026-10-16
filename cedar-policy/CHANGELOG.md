@@ -26,6 +26,11 @@ Cedar Language Version: TBD
 - Remove support for policy templates in the deprecated `entity-manifest` feature. Policy templates
   were previously accepted, but slots were not included in the manifest.
 
+### Fixed
+
+- The policy formatter no longer puts a line break between a method name and its argument list
+  when splitting a long attribute access chain. (resolving #2119)
+
 ## [4.13.0] - 2026-09-15
 
 Cedar Language Version: 4.5
