@@ -26,6 +26,12 @@ Cedar Language Version: TBD
 - Remove support for policy templates in the deprecated `entity-manifest` feature. Policy templates
   were previously accepted, but slots were not included in the manifest.
 
+### Fixed
+
+- The policy parser now recovers from a syntax error right after a scope variable's name (e.g.,
+  `prin cipal == User::"alice"`) at the next `,` or `)`, so errors in the rest of the policy are also
+  reported. Previously it skipped to the end of the policy and reported only the first error (#1293).
+
 ## [4.13.0] - 2026-09-15
 
 Cedar Language Version: 4.5
