@@ -12323,3 +12323,144 @@ mod tolerant_ast_tests {
         let _ = policy.action_constraint();
     }
 }
+
+/// `Debug` for the public `PolicySet` lists policies, templates and links by
+/// id, without source locations or other internal details (#1254).
+mod policy_set_debug_tests {
+    use crate::{EntityUid, Policy, PolicyId, PolicySet, SlotId, Template};
+    use std::collections::HashMap;
+
+    fn uid(s: &str) -> EntityUid {
+        s.parse().unwrap()
+    }
+
+    /// A static policy `b`, a template `t` and a link `a` to it, added in a
+    /// non-sorted order.
+    fn mixed_set() -> PolicySet {
+        let mut pset = PolicySet::new();
+        pset.add(
+            Policy::parse(
+                Some(PolicyId::new("b")),
+                r#"permit(principal == User::"bob", action, resource);"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        pset.add_template(
+            Template::parse(
+                Some(PolicyId::new("t")),
+                "permit(principal == ?principal, action, resource in ?resource);",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        pset.link(
+            PolicyId::new("t"),
+            PolicyId::new("a"),
+            HashMap::from([
+                (SlotId::resource(), uid(r#"Album::"trip""#)),
+                (SlotId::principal(), uid(r#"User::"alice""#)),
+            ]),
+        )
+        .unwrap();
+        pset
+    }
+
+    #[test]
+    fn empty() {
+        assert_eq!(
+            format!("{:?}", PolicySet::new()),
+            "PolicySet { policies: {}, templates: {} }"
+        );
+    }
+
+    #[test]
+    fn static_template_and_link() {
+        assert_eq!(
+            format!("{:?}", mixed_set()),
+            concat!(
+                r#"PolicySet { policies: {"#,
+                r#""a": Link { template: "t", values: {"?principal": "User::\"alice\"", "?resource": "Album::\"trip\""} }, "#,
+                r#""b": "permit(principal == User::\"bob\", action, resource);"}, "#,
+                r#"templates: {"t": "permit(principal == ?principal, action, resource in ?resource);"} }"#,
+            )
+        );
+    }
+
+    #[test]
+    fn pretty() {
+        assert_eq!(
+            format!("{:#?}", mixed_set()),
+            r#"PolicySet {
+    policies: {
+        "a": Link {
+            template: "t",
+            values: {
+                "?principal": "User::\"alice\"",
+                "?resource": "Album::\"trip\"",
+            },
+        },
+        "b": "permit(principal == User::\"bob\", action, resource);",
+    },
+    templates: {
+        "t": "permit(principal == ?principal, action, resource in ?resource);",
+    },
+}"#
+        );
+    }
+
+    #[test]
+    fn no_source_locations_or_internals() {
+        let debug = format!("{:?}", mixed_set());
+        for internal in [
+            "Loc",
+            "SourceSpan",
+            "ast",
+            "lossless",
+            "template_to_links_map",
+        ] {
+            assert!(!debug.contains(internal), "{internal} in {debug}");
+        }
+    }
+
+    #[test]
+    fn independent_of_insertion_order() {
+        let policies = [
+            r#"@id("z") forbid(principal, action, resource);"#,
+            r#"@id("m") permit(principal, action, resource) when { context.ok };"#,
+        ];
+        let forward = PolicySet::from_policies(
+            policies
+                .iter()
+                .enumerate()
+                .map(|(i, src)| Policy::parse(Some(PolicyId::new(["z", "m"][i])), *src).unwrap()),
+        )
+        .unwrap();
+        let backward =
+            PolicySet::from_policies(
+                policies.iter().enumerate().rev().map(|(i, src)| {
+                    Policy::parse(Some(PolicyId::new(["z", "m"][i])), *src).unwrap()
+                }),
+            )
+            .unwrap();
+        assert_eq!(format!("{forward:?}"), format!("{backward:?}"));
+        assert_eq!(
+            format!("{forward:?}"),
+            concat!(
+                r#"PolicySet { policies: {"m": "@id(\"m\") permit(principal, action, resource) when { context.ok };", "#,
+                r#""z": "@id(\"z\") forbid(principal, action, resource);"}, templates: {} }"#,
+            )
+        );
+    }
+
+    #[test]
+    fn keeps_policy_text_as_written() {
+        let pset: PolicySet = "permit(\n  principal,\n  action,\n  resource\n);"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            format!("{pset:?}"),
+            r#"PolicySet { policies: {"policy0": "permit(\n  principal,\n  action,\n  resource\n);"}, templates: {} }"#
+        );
+    }
+}

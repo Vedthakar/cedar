@@ -2629,7 +2629,7 @@ pub(crate) struct StringifiedPolicySet {
 }
 
 /// Represents a set of `Policy`s
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct PolicySet {
     /// AST representation. Technically partially redundant with the other fields.
     /// Internally, we ensure that the duplicated information remains consistent.
@@ -3415,6 +3415,70 @@ impl std::fmt::Display for PolicySet {
             }
         }
         Ok(())
+    }
+}
+
+/// Lists the policies (static policies and template-linked policies) and the
+/// templates by id, sorted by id, with the text of each static policy and
+/// template, and the template and slot values of each link. Source locations
+/// and other internal details are left out; the internal `ast::PolicySet` keeps
+/// its derived `Debug` for that.
+#[expect(
+    clippy::missing_fields_in_debug,
+    reason = "`ast` holds the same policies and templates, with internal details left out on purpose"
+)]
+impl std::fmt::Debug for PolicySet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        /// A template-linked policy: its template's id and its slot values.
+        struct Link<'a>(&'a str, BTreeMap<String, String>);
+        impl std::fmt::Debug for Link<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct("Link")
+                    .field("template", &self.0)
+                    .field("values", &self.1)
+                    .finish()
+            }
+        }
+        /// A static policy's text or a link.
+        enum Entry<'a> {
+            Static(String),
+            Link(Link<'a>),
+        }
+        impl std::fmt::Debug for Entry<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    Self::Static(text) => text.fmt(f),
+                    Self::Link(link) => link.fmt(f),
+                }
+            }
+        }
+
+        let policies: BTreeMap<&str, Entry<'_>> = self
+            .policies
+            .iter()
+            .map(|(id, policy)| {
+                let entry = match (policy.template_id(), policy.template_links()) {
+                    (Some(template), Some(values)) => Entry::Link(Link(
+                        template.as_ref(),
+                        values
+                            .into_iter()
+                            .map(|(slot, uid)| (slot.to_string(), uid.to_string()))
+                            .collect(),
+                    )),
+                    _ => Entry::Static(policy.to_string()),
+                };
+                (id.as_ref(), entry)
+            })
+            .collect();
+        let templates: BTreeMap<&str, String> = self
+            .templates
+            .iter()
+            .map(|(id, template)| (id.as_ref(), template.to_string()))
+            .collect();
+        f.debug_struct("PolicySet")
+            .field("policies", &policies)
+            .field("templates", &templates)
+            .finish()
     }
 }
 
