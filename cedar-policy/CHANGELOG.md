@@ -14,6 +14,12 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
+### Changed
+
+- `Debug` for `PolicySet` now lists its policies and templates by id, sorted by id, with the text of each
+  static policy and template and the template and slot values of each template-linked policy. It no
+  longer prints source locations or other internal details (#1254).
+
 
 ## [4.14.0] - 2026-10-16
 
