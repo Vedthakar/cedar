@@ -2473,13 +2473,13 @@ impl From<cedar_policy_core::validator::ValidationResult> for ValidationResult {
 
 impl std::fmt::Debug for ValidationResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.inner.fmt(f)
+        std::fmt::Debug::fmt(&self.inner, f)
     }
 }
 
 impl std::fmt::Display for ValidationResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.inner.fmt(f)
+        std::fmt::Display::fmt(&self.inner, f)
     }
 }
 

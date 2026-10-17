@@ -14,11 +14,6 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
-### Changed
-
-- The `Display`, `Error` and `Diagnostic` impls for `ValidationResult` now live on the internal
-  validator's `ValidationResult`, and the public type forwards to them. Output is unchanged (#1158).
-
 
 ## [4.14.0] - 2026-10-16
 

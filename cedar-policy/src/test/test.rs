@@ -12354,6 +12354,22 @@ mod validation_result_display_tests {
         (core, wrapper)
     }
 
+    const SINGLE_ERROR: &str = "permit(principal, action, resource) when { resource.nope };";
+    const MULTIPLE: &str = concat!(
+        "permit(principal, action, resource) when { resource.nope };\n",
+        "permit(principal, action, resource) when { principal.missing };\n",
+        "permit(principal, action, resource) when { false };",
+    );
+
+    /// Checks the public `ValidationResult` against output pinned from `main`
+    /// (before #1158), including `Debug`, which the wrapper forwards by hand.
+    fn assert_pinned(src: &str, display: &str, debug: &str, report: &str) {
+        let (_, wrapper) = results(src);
+        assert_eq!(wrapper.to_string(), display);
+        assert_eq!(format!("{wrapper:?}"), debug);
+        assert_eq!(render(&wrapper), report);
+    }
+
     fn render(d: &dyn Diagnostic) -> String {
         let mut out = String::new();
         miette::GraphicalReportHandler::new_themed(miette::GraphicalTheme::unicode_nocolor())
@@ -12402,21 +12418,58 @@ mod validation_result_display_tests {
 
     #[test]
     fn single_error() {
-        let (core, wrapper) =
-            results(r"permit(principal, action, resource) when { resource.nope };");
+        let (core, wrapper) = results(SINGLE_ERROR);
         assert!(!core.validation_passed());
         assert!(!wrapper.validation_passed());
-        assert_same(r"permit(principal, action, resource) when { resource.nope };");
+        assert_same(SINGLE_ERROR);
+        assert_pinned(
+            SINGLE_ERROR,
+            "for policy `policy0`, attribute `nope` on entity type `Photo` not found",
+            "ValidationResult { validation_errors: [UnsafeAttributeAccess(UnsafeAttributeAccess(UnsafeAttributeAccess { source_loc: Some(Loc(`resource.nope`)), policy_id: PolicyID(\"policy0\"), attribute_access: EntityLUB(EntityLUB { lub_elements: NonEmpty { head: EntityType(Name(InternalName { id: Id(\"Photo\"), path: [] })), tail: [] } }, [\"nope\"]), suggestion: Some(\"owner\"), may_exist: false }))], validation_warnings: [] }",
+            concat!(
+            "  × for policy `policy0`, attribute `nope` on entity type `Photo` not found\n",
+            "   ╭────\n",
+            " 1 │ permit(principal, action, resource) when { resource.nope };\n",
+            "   ·                                            ─────────────\n",
+            "   ╰────\n",
+            "  help: did you mean `owner`?\n",
+        ),
+        );
     }
 
     #[test]
     fn multiple_errors_and_warnings() {
-        assert_same(
-            r"
-            permit(principal, action, resource) when { resource.nope };
-            permit(principal, action, resource) when { principal.missing };
-            permit(principal, action, resource) when { false };
-            ",
+        assert_same(MULTIPLE);
+        assert_pinned(
+            MULTIPLE,
+            "for policy `policy0`, attribute `nope` on entity type `Photo` not found",
+            "ValidationResult { validation_errors: [UnsafeAttributeAccess(UnsafeAttributeAccess(UnsafeAttributeAccess { source_loc: Some(Loc(`resource.nope`)), policy_id: PolicyID(\"policy0\"), attribute_access: EntityLUB(EntityLUB { lub_elements: NonEmpty { head: EntityType(Name(InternalName { id: Id(\"Photo\"), path: [] })), tail: [] } }, [\"nope\"]), suggestion: Some(\"owner\"), may_exist: false })), UnsafeAttributeAccess(UnsafeAttributeAccess(UnsafeAttributeAccess { source_loc: Some(Loc(`principal.missing`)), policy_id: PolicyID(\"policy1\"), attribute_access: EntityLUB(EntityLUB { lub_elements: NonEmpty { head: EntityType(Name(InternalName { id: Id(\"User\"), path: [] })), tail: [] } }, [\"missing\"]), suggestion: None, may_exist: false }))], validation_warnings: [ImpossiblePolicy(ImpossiblePolicy(ImpossiblePolicy { source_loc: Some(Loc(`permit(principal, action, resource) when { false };`)), policy_id: PolicyID(\"policy2\") }))] }",
+            concat!(
+            "  × for policy `policy0`, attribute `nope` on entity type `Photo` not found\n",
+            "   ╭─[1:44]\n",
+            " 1 │ permit(principal, action, resource) when { resource.nope };\n",
+            "   ·                                            ─────────────\n",
+            " 2 │ permit(principal, action, resource) when { principal.missing };\n",
+            "   ╰────\n",
+            "  help: did you mean `owner`?\n",
+            "\n",
+            "Error: \n",
+            "  × for policy `policy1`, attribute `missing` on entity type `User` not found\n",
+            "   ╭─[2:44]\n",
+            " 1 │ permit(principal, action, resource) when { resource.nope };\n",
+            " 2 │ permit(principal, action, resource) when { principal.missing };\n",
+            "   ·                                            ─────────────────\n",
+            " 3 │ permit(principal, action, resource) when { false };\n",
+            "   ╰────\n",
+            "\n",
+            "Warning: \n",
+            "  ⚠ for policy `policy2`, policy is impossible: the policy expression evaluates to false for all valid requests\n",
+            "   ╭─[3:1]\n",
+            " 2 │ permit(principal, action, resource) when { principal.missing };\n",
+            " 3 │ permit(principal, action, resource) when { false };\n",
+            "   · ───────────────────────────────────────────────────\n",
+            "   ╰────\n",
+        ),
         );
     }
 
