@@ -286,32 +286,41 @@ impl ConditionalName {
     }
 
     /// Provide a help message for the case where this [`ConditionalName`] failed to resolve
-    pub(crate) fn resolution_failure_help(&self) -> String {
-        let entity_or_common_text = match self.reference_type {
+    pub(crate) fn resolution_failure_help(&self) -> impl std::fmt::Display + '_ {
+        ResolutionFailureHelp(self)
+    }
+}
+
+/// Help message for a [`ConditionalName`] that failed to resolve, written
+/// without building intermediate `String`s.
+struct ResolutionFailureHelp<'a>(&'a ConditionalName);
+
+impl std::fmt::Display for ResolutionFailureHelp<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let entity_or_common_text = match self.0.reference_type {
             ReferenceType::Common => "as a common type",
             ReferenceType::Entity => "as an entity type",
             ReferenceType::CommonOrEntity => "as a common or entity type",
         };
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "indexing is safe because we first check the `.len()`"
-        )]
-        match self.possibilities.len() {
-            1 => format!(
+        let possibilities = &self.0.possibilities;
+        match possibilities.tail.as_slice() {
+            [] => write!(
+                f,
                 "`{}` has not been declared {}",
-                self.possibilities[0], entity_or_common_text
+                possibilities.head, entity_or_common_text
             ),
-            2 => format!(
+            [second] => write!(
+                f,
                 "neither `{}` nor `{}` refers to anything that has been declared {}",
-                self.possibilities[0], self.possibilities[1], entity_or_common_text,
+                possibilities.head, second, entity_or_common_text,
             ),
-            _ => format!(
+            _ => write!(
+                f,
                 "none of these have been declared {}: {}",
                 entity_or_common_text,
-                self.possibilities
+                possibilities
                     .iter()
-                    .map(|p| format!("`{p}`"))
-                    .join(", ")
+                    .format_with(", ", |p, f| f(&format_args!("`{p}`")))
             ),
         }
     }
@@ -337,4 +346,40 @@ pub enum ReferenceType {
     Entity,
     /// The reference can resolve to either an entity or common type name
     CommonOrEntity,
+}
+
+#[cfg(test)]
+mod message_tests {
+    use super::*;
+
+    /// The help is written straight into the formatter; check it is unchanged
+    /// for one, two and three possibilities.
+    #[test]
+    fn resolution_failure_help_unchanged() {
+        let name = |s: &str| s.parse::<InternalName>().unwrap();
+        let help = |possibilities: NonEmpty<InternalName>, reference_type| {
+            ConditionalName {
+                raw: RawName(possibilities.first().clone()),
+                possibilities,
+                reference_type,
+            }
+            .resolution_failure_help()
+            .to_string()
+        };
+        assert_eq!(
+            help(nonempty![name("Foo")], ReferenceType::Common),
+            "`Foo` has not been declared as a common type"
+        );
+        assert_eq!(
+            help(nonempty![name("NS::Foo"), name("Foo")], ReferenceType::Entity),
+            "neither `NS::Foo` nor `Foo` refers to anything that has been declared as an entity type"
+        );
+        assert_eq!(
+            help(
+                nonempty![name("A::B::Foo"), name("A::Foo"), name("Foo")],
+                ReferenceType::CommonOrEntity
+            ),
+            "none of these have been declared as a common or entity type: `A::B::Foo`, `A::Foo`, `Foo`"
+        );
+    }
 }

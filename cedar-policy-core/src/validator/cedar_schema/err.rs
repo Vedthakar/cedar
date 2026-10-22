@@ -716,10 +716,6 @@ impl Diagnostic for DuplicateDeclarations {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("{}", match .missing_or_empty {
-    MissingOrEmpty::Missing => format!("missing `{kind}` declaration for `{name}`"),
-    MissingOrEmpty::Empty { .. } => format!("for action `{name}`, `{kind}` is `[]`, which is invalid")
-})]
 pub struct NoPrincipalOrResource {
     kind: PR,
     name: SmolStr,
@@ -737,6 +733,18 @@ enum MissingOrEmpty {
         /// `Loc` of the declaration
         loc: Option<Loc>,
     },
+}
+
+impl std::fmt::Display for NoPrincipalOrResource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { kind, name, .. } = self;
+        match self.missing_or_empty {
+            MissingOrEmpty::Missing => write!(f, "missing `{kind}` declaration for `{name}`"),
+            MissingOrEmpty::Empty { .. } => {
+                write!(f, "for action `{name}`, `{kind}` is `[]`, which is invalid")
+            }
+        }
+    }
 }
 
 pub const NO_PR_HELP_MSG: &str =

@@ -166,12 +166,7 @@ pub fn unrecognized_action_id_help(
 
 /// Structure containing details about an unexpected type error.
 #[derive(Error, Debug, Clone, Hash, PartialEq, Eq)]
-#[error("for policy `{policy_id}`, unexpected type: expected {} but saw {}",
-    match .expected.iter().next() {
-        Some(single) if .expected.len() == 1 => format!("{single}"),
-        _ => .expected.iter().join(", or ")
-    },
-    .actual)]
+#[error("for policy `{policy_id}`, unexpected type: expected {} but saw {}", .expected.iter().format(", or "), .actual)]
 pub struct UnexpectedType {
     /// Source location
     pub source_loc: Option<Loc>,
@@ -362,13 +357,6 @@ impl Diagnostic for UnsafeOptionalAttributeAccess {
 
 /// Structure containing details about an unsafe tag access error.
 #[derive(Error, Debug, Clone, Hash, PartialEq, Eq)]
-#[error(
-    "for policy `{policy_id}`, unable to guarantee safety of access to tag `{tag}`{}",
-    match .entity_ty.as_ref().and_then(|lub| lub.get_single_entity()) {
-        Some(ety) => format!(" on entity type `{ety}`"),
-        None => "".to_string()
-    }
-)]
 pub struct UnsafeTagAccess {
     /// Source location
     pub source_loc: Option<Loc>,
@@ -378,6 +366,24 @@ pub struct UnsafeTagAccess {
     pub entity_ty: Option<EntityLUB>,
     /// Tag name which we tried to access. May be a nonconstant `Expr`.
     pub tag: Expr<Option<Type>>,
+}
+
+impl std::fmt::Display for UnsafeTagAccess {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "for policy `{}`, unable to guarantee safety of access to tag `{}`",
+            self.policy_id, self.tag
+        )?;
+        if let Some(ety) = self
+            .entity_ty
+            .as_ref()
+            .and_then(|lub| lub.get_single_entity())
+        {
+            write!(f, " on entity type `{ety}`")?;
+        }
+        Ok(())
+    }
 }
 
 impl Diagnostic for UnsafeTagAccess {
@@ -393,13 +399,6 @@ impl Diagnostic for UnsafeTagAccess {
 
 /// Structure containing details about a no-tags-allowed error.
 #[derive(Error, Debug, Clone, Hash, PartialEq, Eq)]
-#[error(
-    "for policy `{policy_id}`, `.getTag()` is not allowed on entities of {} because no `tags` were declared on the entity type in the schema",
-    match .entity_ty.as_ref() {
-        Some(ty) => format!("type `{ty}`"),
-        None => "this type".to_string(),
-    }
-)]
 pub struct NoTagsAllowed {
     /// Source location
     pub source_loc: Option<Loc>,
@@ -409,6 +408,21 @@ pub struct NoTagsAllowed {
     ///
     /// `None` indicates some kind of LUB involving multiple entity types, or `AnyEntity`
     pub entity_ty: Option<EntityType>,
+}
+
+impl std::fmt::Display for NoTagsAllowed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "for policy `{}`, `.getTag()` is not allowed on entities of ",
+            self.policy_id
+        )?;
+        match &self.entity_ty {
+            Some(ty) => write!(f, "type `{ty}`")?,
+            None => f.write_str("this type")?,
+        }
+        f.write_str(" because no `tags` were declared on the entity type in the schema")
+    }
 }
 
 impl Diagnostic for NoTagsAllowed {
@@ -865,5 +879,73 @@ mod test_attr_access {
         assert_message_and_help(&e, "`[\"foo \"].bar`", "e[\"foo \"] has bar");
         let e = ExprBuilder::new().get_attr(e, "@".into());
         assert_message_and_help(&e, "`[\"foo \"].bar[\"@\"]`", "e[\"foo \"].bar has \"@\"");
+    }
+}
+
+#[cfg(test)]
+mod message_tests {
+    use super::*;
+    use crate::ast::ExprBuilder;
+    use crate::expr_builder::ExprBuilder as _;
+
+    fn ety(name: &str) -> EntityType {
+        name.parse().unwrap()
+    }
+
+    /// These messages are written straight into the formatter; check they
+    /// are unchanged.
+    #[test]
+    fn tag_and_type_messages_unchanged() {
+        let tag = || ExprBuilder::with_data(None).val("foo");
+        let single = EntityLUB::single_entity(ety("E"));
+        let unsafe_tag = |entity_ty| UnsafeTagAccess {
+            source_loc: None,
+            policy_id: PolicyID::from_string("0"),
+            entity_ty,
+            tag: tag(),
+        };
+        assert_eq!(
+            unsafe_tag(Some(single.clone())).to_string(),
+            r#"for policy `0`, unable to guarantee safety of access to tag `"foo"` on entity type `E`"#
+        );
+        assert_eq!(
+            unsafe_tag(Some(
+                single.least_upper_bound(&EntityLUB::single_entity(ety("F")))
+            ))
+            .to_string(),
+            r#"for policy `0`, unable to guarantee safety of access to tag `"foo"`"#
+        );
+        assert_eq!(
+            unsafe_tag(None).to_string(),
+            r#"for policy `0`, unable to guarantee safety of access to tag `"foo"`"#
+        );
+
+        let no_tags = |entity_ty| NoTagsAllowed {
+            source_loc: None,
+            policy_id: PolicyID::from_string("0"),
+            entity_ty,
+        };
+        assert_eq!(no_tags(Some(ety("Blank"))).to_string(), "for policy `0`, `.getTag()` is not allowed on entities of type `Blank` because no `tags` were declared on the entity type in the schema");
+        assert_eq!(no_tags(None).to_string(), "for policy `0`, `.getTag()` is not allowed on entities of this type because no `tags` were declared on the entity type in the schema");
+
+        let unexpected = |expected| UnexpectedType {
+            source_loc: None,
+            policy_id: PolicyID::from_string("0"),
+            expected,
+            actual: Type::primitive_string(),
+            help: None,
+        };
+        assert_eq!(
+            unexpected(vec![]).to_string(),
+            "for policy `0`, unexpected type: expected  but saw String"
+        );
+        assert_eq!(
+            unexpected(vec![Type::primitive_long()]).to_string(),
+            "for policy `0`, unexpected type: expected Long but saw String"
+        );
+        assert_eq!(
+            unexpected(vec![Type::primitive_long(), Type::singleton_boolean(true)]).to_string(),
+            "for policy `0`, unexpected type: expected Long, or __cedar::internal::True but saw String"
+        );
     }
 }

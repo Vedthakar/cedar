@@ -419,13 +419,13 @@ pub mod evaluation_errors {
                 format!(
                     "available {}: [{}]",
                     if self.was_attr { "attributes" } else { "tags" },
-                    self.available_attrs_or_tags.iter().join(",")
+                    self.available_attrs_or_tags.iter().format(",")
                 )
             } else {
                 format!(
                     "available {}: [{}, ... ({} more attributes) ]",
                     if self.was_attr { "attributes" } else { "tags" },
-                    self.available_attrs_or_tags.iter().join(","),
+                    self.available_attrs_or_tags.iter().format(","),
                     self.total_attrs_or_tags - self.available_attrs_or_tags.len()
                 )
             };
@@ -485,7 +485,7 @@ pub mod evaluation_errors {
             } else {
                 Some(Box::new(format!(
                     "available attributes: [{}, ... ({} more attributes) ]",
-                    self.available_attrs.iter().join(","),
+                    self.available_attrs.iter().format(","),
                     self.total_attrs - self.available_attrs.len()
                 )))
             }
@@ -752,3 +752,45 @@ pub mod evaluation_errors {
 
 /// Type alias for convenience
 pub type Result<T> = std::result::Result<T, EvaluationError>;
+
+#[cfg(test)]
+mod message_tests {
+    use super::evaluation_errors::{EntityAttrDoesNotExistError, RecordAttrDoesNotExistError};
+    use crate::ast::EntityUID;
+    use std::sync::Arc;
+
+    fn help(d: &dyn miette::Diagnostic) -> String {
+        d.help().unwrap().to_string()
+    }
+
+    /// The attribute lists in these help messages are written with
+    /// `Itertools::format`; check they are unchanged.
+    #[test]
+    fn available_attrs_help_unchanged() {
+        let attrs = vec!["a".into(), "b".into()];
+        let entity_err = |total, was_attr| EntityAttrDoesNotExistError {
+            entity: Arc::new(EntityUID::with_eid_and_type("User", "alice").unwrap()),
+            attr_or_tag: "c".into(),
+            was_attr,
+            exists_the_other_kind: true,
+            available_attrs_or_tags: attrs.clone(),
+            total_attrs_or_tags: total,
+            source_loc: None,
+        };
+        assert_eq!(
+            help(&entity_err(2, true)),
+            "available attributes: [a,b]; note that a tag (not an attribute) named `c` does exist"
+        );
+        assert_eq!(help(&entity_err(7, false)), "available tags: [a,b, ... (5 more attributes) ]; note that an attribute (not a tag) named `c` does exist");
+        let record_err = |total| RecordAttrDoesNotExistError {
+            attr: "c".into(),
+            available_attrs: attrs.clone(),
+            total_attrs: total,
+            source_loc: None,
+        };
+        assert_eq!(
+            help(&record_err(7)),
+            "available attributes: [a,b, ... (5 more attributes) ]"
+        );
+    }
+}

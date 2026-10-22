@@ -495,17 +495,6 @@ pub fn json_schema_to_cedar_schema_str<N: Display>(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn name_collisions_message_unchanged() {
-        let error = super::NameCollisionsError {
-            names: nonempty::nonempty![
-                "A".parse::<InternalName>().unwrap(),
-                "NS::B".parse::<InternalName>().unwrap()
-            ],
-        };
-        assert_eq!(error.to_string(), "There are name collisions: [A, NS::B]");
-    }
-
     use crate::ast::InternalName;
     use crate::extensions::Extensions;
 
@@ -517,6 +506,17 @@ mod tests {
     use cool_asserts::assert_matches;
     use nonempty::NonEmpty;
     use similar_asserts::assert_eq;
+
+    #[test]
+    fn name_collisions_message_unchanged() {
+        let error = super::NameCollisionsError {
+            names: nonempty::nonempty![
+                "A".parse::<InternalName>().unwrap(),
+                "NS::B".parse::<InternalName>().unwrap()
+            ],
+        };
+        assert_eq!(error.to_string(), "There are name collisions: [A, NS::B]");
+    }
 
     #[track_caller]
     fn test_round_trip(src: &str) {
