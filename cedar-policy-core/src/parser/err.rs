@@ -258,7 +258,7 @@ pub enum ToASTErrorKind {
     InvalidPattern(String),
     /// Returned when the right hand side of a `is` expression is not an entity type name
     #[error("right hand side of an `is` expression must be an entity type name, but got `{rhs}`")]
-    #[diagnostic(help("{}", invalid_is_help(lhs, rhs)))]
+    #[diagnostic(help("{}", InvalidIsHelp { lhs, rhs }))]
     InvalidIsType {
         /// LHS of the invalid `is` expression, as a string
         lhs: String,
@@ -415,12 +415,22 @@ pub enum ToASTErrorKind {
     ASTErrorNode,
 }
 
-fn invalid_is_help(lhs: &str, rhs: &str) -> String {
-    // in the specific case where rhs is double-quotes surrounding a valid
-    // (possibly reserved) identifier, give a different help message
-    match strip_surrounding_doublequotes(rhs).map(ast::Id::from_str) {
-        Some(Ok(stripped)) => format!("try removing the quotes: `{lhs} is {stripped}`"),
-        _ => format!("try using `==` to test for equality: `{lhs} == {rhs}`"),
+/// Help for [`ToASTErrorKind::InvalidIsType`], written without building an
+/// intermediate `String`.
+struct InvalidIsHelp<'a> {
+    lhs: &'a str,
+    rhs: &'a str,
+}
+
+impl std::fmt::Display for InvalidIsHelp<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { lhs, rhs } = self;
+        // in the specific case where rhs is double-quotes surrounding a valid
+        // (possibly reserved) identifier, give a different help message
+        match strip_surrounding_doublequotes(rhs).map(ast::Id::from_str) {
+            Some(Ok(stripped)) => write!(f, "try removing the quotes: `{lhs} is {stripped}`"),
+            _ => write!(f, "try using `==` to test for equality: `{lhs} == {rhs}`"),
+        }
     }
 }
 
