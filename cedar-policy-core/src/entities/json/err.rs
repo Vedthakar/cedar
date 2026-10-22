@@ -372,7 +372,7 @@ pub struct ParseEscape {
 }
 
 #[derive(Debug, Error, Diagnostic)]
-#[error("{}, expected a literal entity reference, but got `{}`", .ctx, display_json_value(.got.as_ref()))]
+#[error("{}, expected a literal entity reference, but got `{}`", .ctx, JsonValueDisplay(.got.as_ref()))]
 #[diagnostic(help(
     r#"literal entity references can be made with `{{ "type": "SomeType", "id": "SomeId" }}`"#
 ))]
@@ -390,7 +390,7 @@ pub struct ExpectedLiteralEntityRef {
 // Don't make fields `pub`, don't make breaking changes, and use caution
 // when adding public methods.
 #[derive(Debug, Error, Diagnostic)]
-#[error("{}, expected an extension value, but got `{}`", .ctx, display_json_value(.got.as_ref()))]
+#[error("{}, expected an extension value, but got `{}`", .ctx, JsonValueDisplay(.got.as_ref()))]
 #[diagnostic(help(r#"extension values can be made with `{{ "fn": "SomeFn", "id": "SomeId" }}`"#))]
 pub struct ExpectedExtnValue {
     /// Context of this error
@@ -678,10 +678,15 @@ impl std::fmt::Display for JsonDeserializationErrorContext {
     }
 }
 
-fn display_json_value(v: &Either<serde_json::Value, Expr>) -> String {
-    match v {
-        Either::Left(json) => display_value(json),
-        Either::Right(e) => e.to_string(),
+/// Displays a JSON value as [`JsonDisplay`] does, or an `Expr` as is.
+struct JsonValueDisplay<'a>(&'a Either<serde_json::Value, Expr>);
+
+impl std::fmt::Display for JsonValueDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Either::Left(json) => JsonDisplay(json).fmt(f),
+            Either::Right(e) => e.fmt(f),
+        }
     }
 }
 
@@ -692,19 +697,27 @@ fn display_json_value(v: &Either<serde_json::Value, Expr>) -> String {
 /// Note that this doesn't sort array elements, because JSON arrays are ordered,
 /// so all JSON-handling functions naturally preserve order for arrays and thus
 /// provide a deterministic output.
-fn display_value(v: &serde_json::Value) -> String {
-    match v {
-        serde_json::Value::Array(contents) => {
-            format!("[{}]", contents.iter().map(display_value).join(", "))
+struct JsonDisplay<'a>(&'a serde_json::Value);
+
+impl std::fmt::Display for JsonDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            serde_json::Value::Array(contents) => {
+                write!(f, "[{}]", contents.iter().map(JsonDisplay).format(", "))
+            }
+            serde_json::Value::Object(map) => {
+                let mut v: Vec<_> = map.iter().collect();
+                // We sort the keys here so that our error messages are consistent and defined
+                v.sort_by_key(|p| p.0);
+                write!(
+                    f,
+                    "{{{}}}",
+                    v.iter()
+                        .format_with(",", |(k, v), f| f(&format_args!("\"{k}\":{v}")))
+                )
+            }
+            other => other.fmt(f),
         }
-        serde_json::Value::Object(map) => {
-            let mut v: Vec<_> = map.iter().collect();
-            // We sort the keys here so that our error messages are consistent and defined
-            v.sort_by_key(|p| p.0);
-            let display_kv = |kv: &(&String, &serde_json::Value)| format!("\"{}\":{}", kv.0, kv.1);
-            format!("{{{}}}", v.iter().map(display_kv).join(","))
-        }
-        other => other.to_string(),
     }
 }
 
@@ -733,5 +746,41 @@ fn display_restricted_expr(expr: BorrowedRestrictedExpr<'_>) -> String {
             )
         }
         _ => format!("{expr}"), // all other cases: use the normal Display
+    }
+}
+
+#[cfg(test)]
+mod message_tests {
+    use super::*;
+
+    /// The JSON value is written as it was with the old `String`-building
+    /// `display_value`: arrays in order, object keys sorted.
+    #[test]
+    fn json_value_messages_unchanged() {
+        let got = serde_json::json!({"z": [1, "two", {"b": true, "a": null}], "fn": "ip"});
+        assert_eq!(
+            ExpectedExtnValue {
+                ctx: Box::new(JsonDeserializationErrorContext::Context),
+                got: Box::new(Either::Left(got.clone())),
+            }
+            .to_string(),
+            r#"while parsing context, expected an extension value, but got `{"fn":"ip","z":[1,"two",{"b":true,"a":null}]}`"#
+        );
+        assert_eq!(
+            ExpectedLiteralEntityRef {
+                ctx: Box::new(JsonDeserializationErrorContext::Context),
+                got: Box::new(Either::Left(serde_json::json!([got, 3]))),
+            }
+            .to_string(),
+            r#"while parsing context, expected a literal entity reference, but got `[{"fn":"ip","z":[1,"two",{"b":true,"a":null}]}, 3]`"#
+        );
+        assert_eq!(
+            ExpectedExtnValue {
+                ctx: Box::new(JsonDeserializationErrorContext::Context),
+                got: Box::new(Either::Right(Expr::val(7))),
+            }
+            .to_string(),
+            "while parsing context, expected an extension value, but got `7`"
+        );
     }
 }

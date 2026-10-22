@@ -219,7 +219,7 @@ pub enum ToASTErrorKind {
     #[diagnostic(transparent)]
     InvalidActionType(#[from] parse_errors::InvalidActionType),
     /// Returned when a condition clause is empty
-    #[error("{}condition clause cannot be empty", match .0 { Some(ident) => format!("`{ident}` "), None => "".to_string() })]
+    #[error(fmt = fmt_empty_clause)]
     EmptyClause(Option<cst::Ident>),
     /// Returned when membership chains do not resolve to an expression,
     /// violating an internal invariant
@@ -258,7 +258,7 @@ pub enum ToASTErrorKind {
     InvalidPattern(String),
     /// Returned when the right hand side of a `is` expression is not an entity type name
     #[error("right hand side of an `is` expression must be an entity type name, but got `{rhs}`")]
-    #[diagnostic(help("{}", invalid_is_help(lhs, rhs)))]
+    #[diagnostic(help("{}", InvalidIsHelp { lhs, rhs }))]
     InvalidIsType {
         /// LHS of the invalid `is` expression, as a string
         lhs: String,
@@ -415,12 +415,36 @@ pub enum ToASTErrorKind {
     ASTErrorNode,
 }
 
-fn invalid_is_help(lhs: &str, rhs: &str) -> String {
-    // in the specific case where rhs is double-quotes surrounding a valid
-    // (possibly reserved) identifier, give a different help message
-    match strip_surrounding_doublequotes(rhs).map(ast::Id::from_str) {
-        Some(Ok(stripped)) => format!("try removing the quotes: `{lhs} is {stripped}`"),
-        _ => format!("try using `==` to test for equality: `{lhs} == {rhs}`"),
+#[expect(
+    clippy::ref_option,
+    reason = "`#[error(fmt = ...)]` passes the field by reference"
+)]
+fn fmt_empty_clause(
+    ident: &Option<cst::Ident>,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    if let Some(ident) = ident {
+        write!(f, "`{ident}` ")?;
+    }
+    f.write_str("condition clause cannot be empty")
+}
+
+/// Help for [`ToASTErrorKind::InvalidIsType`], written without building an
+/// intermediate `String`.
+struct InvalidIsHelp<'a> {
+    lhs: &'a str,
+    rhs: &'a str,
+}
+
+impl std::fmt::Display for InvalidIsHelp<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { lhs, rhs } = self;
+        // in the specific case where rhs is double-quotes surrounding a valid
+        // (possibly reserved) identifier, give a different help message
+        match strip_surrounding_doublequotes(rhs).map(ast::Id::from_str) {
+            Some(Ok(stripped)) => write!(f, "try removing the quotes: `{lhs} is {stripped}`"),
+            _ => write!(f, "try using `==` to test for equality: `{lhs} == {rhs}`"),
+        }
     }
 }
 
@@ -577,13 +601,23 @@ pub mod parse_errors {
 
     /// Details about an `WrongEntityArgument` error.
     #[derive(Debug, Clone, Diagnostic, Error, PartialEq, Eq)]
-    #[error("expected {}, found {got}", match .expected { Either::Left(r) => r.to_string(), Either::Right((r1, r2)) => format!("{r1} or {r2}") })]
     pub struct WrongEntityArgument {
         /// What kinds of references the given scope clause required.
         /// Some scope clauses require exactly one kind of reference, some require one of two
         pub(crate) expected: Either<Ref, (Ref, Ref)>,
         /// The kind of reference that was present in the policy
         pub(crate) got: Ref,
+    }
+
+    impl std::fmt::Display for WrongEntityArgument {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match &self.expected {
+                Either::Left(r) => write!(f, "expected {r}, found {}", self.got),
+                Either::Right((r1, r2)) => {
+                    write!(f, "expected {r1} or {r2}, found {}", self.got)
+                }
+            }
+        }
     }
 
     /// The 3 kinds of literals that can be in a policy scope
@@ -1024,5 +1058,22 @@ impl<'a> IntoIterator for &'a ParseErrors {
 
     fn into_iter(self) -> Self::IntoIter {
         iter::once(&self.head).chain(self.tail.iter())
+    }
+}
+
+#[cfg(test)]
+mod message_tests {
+    use super::*;
+
+    #[test]
+    fn empty_clause_message_unchanged() {
+        assert_eq!(
+            ToASTErrorKind::EmptyClause(None).to_string(),
+            "condition clause cannot be empty"
+        );
+        assert_eq!(
+            ToASTErrorKind::EmptyClause(Some(cst::Ident::Ident("when".into()))).to_string(),
+            "`when` condition clause cannot be empty"
+        );
     }
 }

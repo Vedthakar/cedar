@@ -533,7 +533,7 @@ pub mod schema_errors {
     // Don't make fields `pub`, don't make breaking changes, and use caution
     // when adding public methods.
     #[derive(Debug, Error)]
-    #[error("failed to resolve type{}: {}", if .undefined_types.len() > 1 { "s" } else { "" }, .undefined_types.iter().map(crate::validator::ConditionalName::raw).join(", "))]
+    #[error("failed to resolve type{}: {}", if .undefined_types.len() > 1 { "s" } else { "" }, .undefined_types.iter().map(crate::validator::ConditionalName::raw).format(", "))]
     pub struct TypeNotDefinedError {
         /// Names of type(s) which were not defined
         pub(crate) undefined_types: NonEmpty<crate::validator::ConditionalName>,
@@ -860,7 +860,7 @@ pub mod schema_errors {
         #[error("records and entities with `additionalAttributes` are experimental, but the experimental `partial-validate` feature is not enabled")]
         OpenRecordsAndEntities,
         // Action attributes are allowed if `ActionBehavior` is `PermitAttributes`
-        #[error("action declared with attributes: [{}]", .0.iter().join(", "))]
+        #[error("action declared with attributes: [{}]", .0.iter().format(", "))]
         ActionAttributes(Vec<String>),
     }
 
@@ -1001,7 +1001,7 @@ pub mod schema_errors {
     // Don't make fields `pub`, don't make breaking changes, and use caution
     // when adding public methods.
     #[derive(Error, Debug)]
-    #[error("internal invariant violated: failed to find {} for {}", if .euids.len() > 1 { "action definitions" } else { "an action definition" }, .euids.iter().join(", "))]
+    #[error("internal invariant violated: failed to find {} for {}", if .euids.len() > 1 { "action definitions" } else { "an action definition" }, .euids.iter().format(", "))]
     pub struct ActionInvariantViolationError {
         /// Fully-qualified [`EntityUID`]s of the action(s) we failed to find a definition for
         pub(crate) euids: NonEmpty<EntityUID>,
@@ -1080,5 +1080,37 @@ pub mod schema_errors {
 
     impl Diagnostic for InvalidActionTypeError {
         impl_diagnostic_from_method_on_field!(uid, loc);
+    }
+}
+
+#[cfg(test)]
+mod message_tests {
+    use super::schema_errors::{ActionInvariantViolationError, UnsupportedFeature};
+    use crate::ast::EntityUID;
+    use nonempty::nonempty;
+
+    /// These messages list their items with `Itertools::format`; check the
+    /// lists are written as they were with `join`.
+    #[test]
+    fn list_messages_unchanged() {
+        assert_eq!(
+            UnsupportedFeature::ActionAttributes(vec!["a".into(), "b".into()]).to_string(),
+            "action declared with attributes: [a, b]"
+        );
+        let uid = |eid| EntityUID::with_eid_and_type("Action", eid).unwrap();
+        assert_eq!(
+            ActionInvariantViolationError {
+                euids: nonempty![uid("view")]
+            }
+            .to_string(),
+            r#"internal invariant violated: failed to find an action definition for Action::"view""#
+        );
+        assert_eq!(
+            ActionInvariantViolationError {
+                euids: nonempty![uid("view"), uid("edit")]
+            }
+            .to_string(),
+            r#"internal invariant violated: failed to find action definitions for Action::"view", Action::"edit""#
+        );
     }
 }

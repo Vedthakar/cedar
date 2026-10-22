@@ -370,7 +370,7 @@ pub enum ToCedarSchemaSyntaxError {
 //
 // This is NOT a publicly exported error type.
 #[derive(Debug, Error)]
-#[error("There are name collisions: [{}]", .names.iter().join(", "))]
+#[error("There are name collisions: [{}]", .names.iter().format(", "))]
 pub struct NameCollisionsError {
     /// Names that had collisions
     names: NonEmpty<InternalName>,
@@ -391,7 +391,7 @@ impl NameCollisionsError {
 //
 // This is NOT a publicly exported error type.
 #[derive(Debug, Error)]
-#[error("The following entities have shapes that cannot be converted to Cedar schema syntax: [{}]", .names.iter().join(", "))]
+#[error("The following entities have shapes that cannot be converted to Cedar schema syntax: [{}]", .names.iter().format(", "))]
 pub struct UnconvertibleEntityTypeShapeError {
     /// Names of type definitions with shapes not supported in Cedar schema syntax.
     names: NonEmpty<InternalName>,
@@ -506,6 +506,17 @@ mod tests {
     use cool_asserts::assert_matches;
     use nonempty::NonEmpty;
     use similar_asserts::assert_eq;
+
+    #[test]
+    fn name_collisions_message_unchanged() {
+        let error = super::NameCollisionsError {
+            names: nonempty::nonempty![
+                "A".parse::<InternalName>().unwrap(),
+                "NS::B".parse::<InternalName>().unwrap()
+            ],
+        };
+        assert_eq!(error.to_string(), "There are name collisions: [A, NS::B]");
+    }
 
     #[track_caller]
     fn test_round_trip(src: &str) {

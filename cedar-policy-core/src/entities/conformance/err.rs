@@ -393,8 +393,7 @@ impl Diagnostic for InvalidEnumEntityError {
             "valid entity eids: {}",
             self.choices
                 .iter()
-                .map(|e| format!("\"{}\"", e.escaped()))
-                .join(", ")
+                .format_with(", ", |e, f| f(&format_args!("\"{}\"", e.escaped())))
         )))
     }
 }

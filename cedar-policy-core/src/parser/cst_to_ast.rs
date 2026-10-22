@@ -4203,6 +4203,13 @@ mod tests {
                 ).exactly_one_underline("resource is Doc == Doc::\"a\"").build(),
             ),
             (
+                r#"permit(principal is "User", action, resource);"#,
+                ExpectedErrorMessageBuilder::error(
+                    r#"right hand side of an `is` expression must be an entity type name, but got `"User"`"#,
+                ).help(r#"try removing the quotes: `principal is User`"#)
+                .exactly_one_underline("\"User\"").build(),
+            ),
+            (
                 r#"permit(principal is User::"alice", action, resource);"#,
                 ExpectedErrorMessageBuilder::error(
                     r#"right hand side of an `is` expression must be an entity type name, but got `User::"alice"`"#,

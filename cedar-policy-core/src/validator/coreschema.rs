@@ -556,10 +556,11 @@ pub mod request_validation_errors {
 
     impl Diagnostic for InvalidPrincipalTypeError {
         fn help<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
-            Some(Box::new(invalid_principal_type_help(
-                &self.valid_principal_tys,
-                &self.action,
-            )))
+            Some(Box::new(ValidTypesHelp {
+                kind: "principal",
+                valid_tys: &self.valid_principal_tys,
+                action: &self.action,
+            }))
         }
 
         // possible future improvement: provide two labels, one for the source
@@ -567,21 +568,32 @@ pub mod request_validation_errors {
         impl_diagnostic_from_method_on_field!(principal_ty, loc);
     }
 
-    fn invalid_principal_type_help(
-        valid_principal_tys: &[ast::EntityType],
-        action: &ast::EntityUID,
-    ) -> String {
-        if valid_principal_tys.is_empty() {
-            format!("no principal types are valid for `{action}`")
-        } else {
-            format!(
-                "valid principal types for `{action}`: {}",
-                valid_principal_tys
-                    .iter()
-                    .sorted_unstable()
-                    .map(|et| format!("`{et}`"))
-                    .join(", ")
-            )
+    /// Help for an invalid principal or resource type, written without
+    /// building intermediate `String`s.
+    struct ValidTypesHelp<'a> {
+        kind: &'static str,
+        valid_tys: &'a [ast::EntityType],
+        action: &'a ast::EntityUID,
+    }
+
+    impl std::fmt::Display for ValidTypesHelp<'_> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let Self {
+                kind,
+                valid_tys,
+                action,
+            } = self;
+            if valid_tys.is_empty() {
+                return write!(f, "no {kind} types are valid for `{action}`");
+            }
+            write!(f, "valid {kind} types for `{action}`: ")?;
+            for (i, et) in valid_tys.iter().sorted_unstable().enumerate() {
+                if i > 0 {
+                    f.write_str(", ")?;
+                }
+                write!(f, "`{et}`")?;
+            }
+            Ok(())
         }
     }
 
@@ -617,33 +629,16 @@ pub mod request_validation_errors {
 
     impl Diagnostic for InvalidResourceTypeError {
         fn help<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
-            Some(Box::new(invalid_resource_type_help(
-                &self.valid_resource_tys,
-                &self.action,
-            )))
+            Some(Box::new(ValidTypesHelp {
+                kind: "resource",
+                valid_tys: &self.valid_resource_tys,
+                action: &self.action,
+            }))
         }
 
         // possible future improvement: provide two labels, one for the source
         // loc on `resource_ty` and the other for the source loc on `action`
         impl_diagnostic_from_method_on_field!(resource_ty, loc);
-    }
-
-    fn invalid_resource_type_help(
-        valid_resource_tys: &[ast::EntityType],
-        action: &ast::EntityUID,
-    ) -> String {
-        if valid_resource_tys.is_empty() {
-            format!("no resource types are valid for `{action}`")
-        } else {
-            format!(
-                "valid resource types for `{action}`: {}",
-                valid_resource_tys
-                    .iter()
-                    .sorted_unstable()
-                    .map(|et| format!("`{et}`"))
-                    .join(", ")
-            )
-        }
     }
 
     impl InvalidResourceTypeError {
@@ -665,7 +660,6 @@ pub mod request_validation_errors {
 
     /// Context does not comply with the shape specified for the request action
     #[derive(Debug, Error, Diagnostic)]
-    #[error("context `{}` is not valid for `{action}`", ast::BoundedToString::to_string_bounded(.context, BOUNDEDDISPLAY_BOUND_FOR_INVALID_CONTEXT_ERROR))]
     pub struct InvalidContextError {
         /// Context which is not valid
         pub(crate) context: ast::Context,
@@ -674,6 +668,21 @@ pub mod request_validation_errors {
     }
 
     const BOUNDEDDISPLAY_BOUND_FOR_INVALID_CONTEXT_ERROR: usize = 5;
+
+    // Written by hand, rather than with `#[error(...)]`, so the context is
+    // written straight into the message rather than through an intermediate
+    // `String`.
+    impl std::fmt::Display for InvalidContextError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("context `")?;
+            ast::BoundedDisplay::fmt_bounded(
+                &self.context,
+                f,
+                BOUNDEDDISPLAY_BOUND_FOR_INVALID_CONTEXT_ERROR,
+            )?;
+            write!(f, "` is not valid for `{}`", self.action)
+        }
+    }
 
     impl InvalidContextError {
         /// The context which is not valid
@@ -1225,6 +1234,61 @@ mod test {
                     &ExpectedErrorMessageBuilder::error(r#"context `{admin_approval: true, "also extra": "spam", extra1: false, extra2: [-100], extra3: User::"alice", .. }` is not valid for `Action::"edit_photo"`"#).build(),
                 );
             }
+        );
+    }
+
+    /// The context error and the type help are written straight into the
+    /// message. Check they match what the old `String`-building code produced,
+    /// including at and around the bound on the number of context attributes.
+    #[test]
+    fn request_validation_messages_unchanged() {
+        let action = Arc::new(ast::EntityUID::with_eid_and_type("Action", "edit").unwrap());
+        for attrs in [0, 1, 5, 6, 12] {
+            let context = ast::Context::from_pairs(
+                (0..attrs).map(|i| (format!("a{i}").into(), ast::RestrictedExpr::val(i))),
+                Extensions::all_available(),
+            )
+            .unwrap();
+            let old = format!(
+                "context `{}` is not valid for `{action}`",
+                // BOUNDEDDISPLAY_BOUND_FOR_INVALID_CONTEXT_ERROR
+                ast::BoundedToString::to_string_bounded(&context, 5)
+            );
+            let err = request_validation_errors::InvalidContextError {
+                context,
+                action: Arc::clone(&action),
+            };
+            assert_eq!(err.to_string(), old, "{attrs} attributes");
+        }
+        assert_eq!(
+            request_validation_errors::InvalidContextError {
+                context: ast::Context::from_pairs(
+                    (0..6).map(|i| (format!("a{i}").into(), ast::RestrictedExpr::val(i))),
+                    Extensions::all_available(),
+                )
+                .unwrap(),
+                action: Arc::clone(&action),
+            }
+            .to_string(),
+            r#"context `{a0: 0, a1: 1, a2: 2, a3: 3, a4: 4, .. }` is not valid for `Action::"edit"`"#
+        );
+
+        let ty = |name: &str| ast::EntityType::from_normalized_str(name).unwrap();
+        let help = |valid: Vec<ast::EntityType>| {
+            let err = request_validation_errors::InvalidResourceTypeError {
+                resource_ty: ty("Other"),
+                action: Arc::clone(&action),
+                valid_resource_tys: valid,
+            };
+            miette::Diagnostic::help(&err).map(|h| h.to_string())
+        };
+        assert_eq!(
+            help(vec![]).as_deref(),
+            Some(r#"no resource types are valid for `Action::"edit"`"#)
+        );
+        assert_eq!(
+            help(vec![ty("Photo"), ty("Album"), ty("Doc")]).as_deref(),
+            Some(r#"valid resource types for `Action::"edit"`: `Album`, `Doc`, `Photo`"#)
         );
     }
 
