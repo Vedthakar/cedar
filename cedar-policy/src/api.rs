@@ -23,6 +23,8 @@
     reason = "this module doesn't currently comply with these lints"
 )]
 
+mod attribute_paths;
+pub use attribute_paths::{AttributePath, AttributePathRoot};
 mod id;
 use cedar_policy_core::pst::error_body;
 #[cfg(feature = "entity-manifest")]
@@ -3811,6 +3813,14 @@ impl Template {
     pub fn get_valid_request_envs(&self, s: &Schema) -> impl Iterator<Item = RequestEnv> {
         get_valid_request_envs(&self.ast, s)
     }
+
+    /// Get every attribute path that this template reads or tests with
+    /// `has`. See [`Policy::attribute_paths`]; attribute accesses on a slot
+    /// (`?principal.name`) are not included.
+    #[doc = include_str!("../experimental_warning.md")]
+    pub fn attribute_paths(&self) -> BTreeSet<AttributePath> {
+        attribute_paths::attribute_paths(&self.ast.condition())
+    }
 }
 
 impl std::fmt::Display for Template {
@@ -4243,6 +4253,20 @@ impl Policy {
     /// not trivially false.
     pub fn get_valid_request_envs(&self, s: &Schema) -> impl Iterator<Item = RequestEnv> {
         get_valid_request_envs(self.ast.template(), s)
+    }
+
+    /// Get every attribute path that this policy reads or tests with `has`,
+    /// starting from `principal`, `action`, `resource`, `context` or an entity
+    /// literal, e.g. `resource.owner.name` for `resource.owner.name == "alice"`
+    /// or for `resource has owner.name`. Every prefix of a path that is read is
+    /// also included (`resource.owner` above).
+    ///
+    /// Attribute accesses on other expressions, such as
+    /// `(if c then principal else resource).name`, a record literal or a
+    /// `getTag` result, are not included, and neither are tag accesses.
+    #[doc = include_str!("../experimental_warning.md")]
+    pub fn attribute_paths(&self) -> BTreeSet<AttributePath> {
+        attribute_paths::attribute_paths(&self.ast.condition())
     }
 
     /// Get all entity literals occuring in a `Policy`

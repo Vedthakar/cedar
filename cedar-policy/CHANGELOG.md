@@ -14,6 +14,10 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
+### Added
+
+- Experimental `Policy::attribute_paths()` and `Template::attribute_paths()`, returning the attribute access paths (e.g. `resource.owner.name`) a policy's conditions read or test with `has`. (#2127)
+
 ### Fixed
 
 - Fixed `Entities::upsert_entities` keeping a stale ancestor when the same entity is given more than
