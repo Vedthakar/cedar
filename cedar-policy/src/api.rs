@@ -2011,6 +2011,40 @@ impl Schema {
         Ok((Self(schema), warnings))
     }
 
+    /// Convert this [`Schema`] into a single [`SchemaFragment`] holding all of
+    /// its entity types and actions, even if it was built from several
+    /// fragments. Use it to write the schema out in the Cedar schema format
+    /// with [`SchemaFragment::to_cedarschema`].
+    ///
+    /// The result is semantically equivalent to this [`Schema`], but it is not
+    /// the input the [`Schema`] was built from: formatting, annotations, the
+    /// order of declarations and common type definitions are not kept (common
+    /// types are inlined), and every entity type and action lists all of its
+    /// transitive ancestors as parents.
+    pub fn to_schema_fragment(&self) -> Result<SchemaFragment, SchemaError> {
+        let lossless = self.0.to_json_schema().map_err(|msg| {
+            SchemaError::JsonSerialization(
+                <serde_json::Error as serde::ser::Error>::custom(msg).into(),
+            )
+        })?;
+        Ok(SchemaFragment {
+            value: lossless.clone().try_into()?,
+            lossless,
+        })
+    }
+
+    /// Serialize this [`Schema`] as a JSON value in the JSON schema format.
+    /// See [`Schema::to_schema_fragment`] for what is and isn't kept.
+    pub fn to_json_value(&self) -> Result<serde_json::Value, SchemaError> {
+        self.to_schema_fragment()?.to_json_value()
+    }
+
+    /// Serialize this [`Schema`] as a JSON string in the JSON schema format.
+    /// See [`Schema::to_schema_fragment`] for what is and isn't kept.
+    pub fn to_json_string(&self) -> Result<String, SchemaError> {
+        self.to_schema_fragment()?.to_json_string()
+    }
+
     /// Extract from the schema an [`Entities`] containing the action entities
     /// defined in the schema. External actions are excluded.
     pub fn action_entities(&self) -> Result<Entities, EntitiesError> {

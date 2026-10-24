@@ -9587,6 +9587,83 @@ mod to_json {
     }
 }
 
+/// `Schema` serialization (#500)
+mod schema_to_json {
+    use crate::{Schema, SchemaFragment};
+    use serde_json::json;
+
+    const SCHEMA: &str = r#"
+        namespace App {
+            type Ctx = { ip: ipaddr, mfa?: Bool };
+            entity Group in [Group];
+            entity User in [Group] { name: String, tags?: Set<String> } tags Long;
+            entity Color enum ["red", "green"];
+            entity Doc { owner: User, color: Color };
+            action read, write appliesTo { principal: [User], resource: [Doc], context: Ctx };
+            action edit in [write] appliesTo { principal: User, resource: Doc };
+        }
+        entity Top;
+        action "top" appliesTo { principal: Top, resource: App::Doc };
+    "#;
+
+    fn schema() -> Schema {
+        Schema::from_cedarschema_str(SCHEMA).unwrap().0
+    }
+
+    #[test]
+    fn json_value_round_trips() {
+        let schema = schema();
+        let json = schema.to_json_value().unwrap();
+        let reparsed = Schema::from_json_value(json).unwrap();
+        similar_asserts::assert_eq!(reparsed.0, schema.0);
+    }
+
+    #[test]
+    fn json_string_round_trips() {
+        let schema = schema();
+        let json = schema.to_json_string().unwrap();
+        let reparsed = Schema::from_json_str(&json).unwrap();
+        similar_asserts::assert_eq!(reparsed.0, schema.0);
+    }
+
+    #[test]
+    fn cedarschema_round_trips_through_fragment() {
+        let schema = schema();
+        let src = schema
+            .to_schema_fragment()
+            .unwrap()
+            .to_cedarschema()
+            .unwrap();
+        let reparsed = Schema::from_cedarschema_str(&src).unwrap().0;
+        similar_asserts::assert_eq!(reparsed.0, schema.0);
+    }
+
+    #[test]
+    fn multiple_fragments_become_one() {
+        let (a, _) = SchemaFragment::from_cedarschema_str(
+            "namespace A { entity User in [B::Team]; action view appliesTo { principal: User, resource: B::Team }; }",
+        )
+        .unwrap();
+        let (b, _) = SchemaFragment::from_cedarschema_str("namespace B { entity Team; }").unwrap();
+        let schema = Schema::from_schema_fragments([a, b]).unwrap();
+        let json = schema.to_json_value().unwrap();
+        let namespaces: Vec<&String> = json.as_object().unwrap().keys().collect();
+        assert_eq!(namespaces, ["A", "B"]);
+        assert_eq!(
+            json["A"]["entityTypes"]["User"]["memberOfTypes"],
+            json!(["B::Team"])
+        );
+        let reparsed = Schema::from_json_value(json).unwrap();
+        similar_asserts::assert_eq!(reparsed.0, schema.0);
+    }
+
+    #[test]
+    fn empty_schema() {
+        let schema = Schema::from_cedarschema_str("").unwrap().0;
+        assert_eq!(schema.to_json_value().unwrap(), json!({}));
+    }
+}
+
 mod test_entities_api {
     use std::collections::HashSet;
 
