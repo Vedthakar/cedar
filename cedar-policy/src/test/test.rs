@@ -9587,6 +9587,122 @@ mod to_json {
     }
 }
 
+/// `Policy::attribute_paths` and `Template::attribute_paths` (#2127)
+mod attribute_paths {
+    use crate::{AttributePathRoot, Policy, Template};
+
+    fn paths(src: &str) -> Vec<String> {
+        Policy::parse(None, src)
+            .unwrap()
+            .attribute_paths()
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn nested_attributes_and_prefixes() {
+        assert_eq!(
+            paths(
+                r#"permit(principal, action, resource) when { resource.owner.name == principal.name };"#
+            ),
+            ["principal.name", "resource.owner", "resource.owner.name"]
+        );
+    }
+
+    #[test]
+    fn has_and_extended_has() {
+        assert_eq!(
+            paths(
+                r#"permit(principal, action, resource) when {
+                    if resource has v1 then resource.v1.owner == principal.name
+                    else resource has v2.renamed.owner
+                };"#
+            ),
+            [
+                "principal.name",
+                "resource.v1",
+                "resource.v1.owner",
+                "resource.v2",
+                "resource.v2.renamed",
+                "resource.v2.renamed.owner",
+            ]
+        );
+    }
+
+    #[test]
+    fn like_and_set_operations() {
+        assert_eq!(
+            paths(
+                r#"permit(principal, action, resource) when {
+                    resource.namespace like "*" && principal.groups.contains(resource.group)
+                    && context.tags.containsAny(["a"])
+                };"#
+            ),
+            [
+                "principal.groups",
+                "resource.group",
+                "resource.namespace",
+                "context.tags",
+            ]
+        );
+    }
+
+    #[test]
+    fn entity_literals_and_quoted_attributes() {
+        let policy = Policy::parse(
+            None,
+            r#"permit(principal, action, resource) when { User::"alice"["first name"] == "A" && action.level > 1 };"#,
+        )
+        .unwrap();
+        let paths: Vec<_> = policy.attribute_paths().into_iter().collect();
+        assert_eq!(paths.len(), 2);
+        assert_eq!(paths[0].root(), &AttributePathRoot::Action);
+        assert_eq!(paths[0].attrs().collect::<Vec<_>>(), ["level"]);
+        assert_eq!(paths[0].to_string(), "action.level");
+        assert_eq!(
+            paths[1].root(),
+            &AttributePathRoot::Entity(r#"User::"alice""#.parse().unwrap())
+        );
+        assert_eq!(paths[1].attrs().collect::<Vec<_>>(), ["first name"]);
+        assert_eq!(paths[1].to_string(), r#"User::"alice"["first name"]"#);
+    }
+
+    #[test]
+    fn other_bases_and_tags_are_not_paths() {
+        assert_eq!(
+            paths(
+                r#"permit(principal, action, resource) when {
+                    (if context.flag then principal else resource).name == "x"
+                    && {a: 1}.a == 1
+                    && principal.hasTag("t") && principal.getTag("t").x == 1
+                };"#
+            ),
+            ["context.flag"]
+        );
+    }
+
+    #[test]
+    fn no_attributes() {
+        assert!(paths(r#"permit(principal == User::"a", action, resource);"#).is_empty());
+    }
+
+    #[test]
+    fn templates() {
+        let template = Template::parse(
+            None,
+            r#"permit(principal == ?principal, action, resource in ?resource) when { resource.owner == principal };"#,
+        )
+        .unwrap();
+        let paths: Vec<String> = template
+            .attribute_paths()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(paths, ["resource.owner"]);
+    }
+}
+
 mod test_entities_api {
     use std::collections::HashSet;
 
