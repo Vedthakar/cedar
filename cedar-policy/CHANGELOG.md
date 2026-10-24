@@ -14,6 +14,12 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
+### Added
+
+- `Schema::to_json_value`, `Schema::to_json_string` and `Schema::to_schema_fragment` serialize a `Schema`, including one
+  built from several fragments. The output is equivalent to the input, but annotations, formatting, declaration order and
+  common type definitions are not preserved. (#500)
+
 ### Fixed
 
 - Fixed `Entities::upsert_entities` keeping a stale ancestor when the same entity is given more than
