@@ -14,6 +14,10 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
+### Changed
+
+- Parse errors for a parenthesized attribute name (e.g. `{("attr"): 1}`) or `like` pattern (e.g. `like ("*")`) now say that the parentheses are the problem and suggest removing them. (#1093, #247)
+
 ### Fixed
 
 - Fixed `Entities::upsert_entities` keeping a stale ancestor when the same entity is given more than
