@@ -1520,6 +1520,30 @@ mod tests {
             "Cedar has no `?:` operator; try `if <condition> then <expr> else <expr>`",
         );
 
+        assert_hint("principal.a&principal.b", "invalid token", "", AND);
+        assert_hint("principal.a|principal.b", "invalid token", "", OR);
+        assert_hint(
+            "principal.a ?1 : 2",
+            "invalid token",
+            "",
+            "Cedar has no `?:` operator; try `if <condition> then <expr> else <expr>`",
+        );
+        // Imprecise but intended: `and` right after a complete expression
+        // gets the hint, even inside a record literal
+        let src = "permit(principal, action, resource) when { {a: 1 and b: 2} == {} };";
+        let errs = assert_parse_fails(parse_policies, src);
+        expect_exactly_one_error(
+            src,
+            &errs,
+            &ExpectedErrorMessageBuilder::error("unexpected token `and`")
+                .exactly_one_underline_with_label(
+                    "and",
+                    "expected `!=`, `&&`, `(`, `*`, `+`, `,`, `-`, `.`, `<`, `<=`, `==`, `>`, `>=`, `[`, `||`, `}`, `has`, `in`, `is`, or `like`",
+                )
+                .help(AND)
+                .build(),
+        );
+
         // no hints for `and` and `or` where no operator could go, e.g. as names
         assert_parse_succeeds(
             parse_policies,

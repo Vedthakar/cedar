@@ -700,13 +700,17 @@ impl Diagnostic for ToCSTError {
                         .iter()
                         .find(|hint| {
                             hint.invalid_token.is_some_and(|c| c == tok_last_char)
-                                // `?principal` and `?resource` are slots
-                                && !self
-                                    .src
-                                    .get(location + tok_last_char.len_utf8()..)
-                                    .is_some_and(|rest| {
-                                        rest.starts_with(|c: char| c.is_alphanumeric() || c == '_')
-                                    })
+                                // `?` followed by a letter or `_` is a
+                                // (possibly misspelled) slot like `?principal`
+                                && !(tok_last_char == '?'
+                                    && self
+                                        .src
+                                        .get(location + 1..)
+                                        .is_some_and(|rest| {
+                                            rest.starts_with(|c: char| {
+                                                c.is_alphabetic() || c == '_'
+                                            })
+                                        }))
                         })
                         .map(|hint| Box::new(hint.help) as Box<dyn Display>),
                 }
@@ -731,7 +735,7 @@ impl Diagnostic for ToCSTError {
 /// from Cedar (#944). Add an entry here to hint at another one.
 struct OperatorHint {
     /// The hint applies to an `InvalidToken` error starting with this
-    /// character, unless it is immediately followed by an identifier (so
+    /// character (except `?` immediately followed by a letter or `_`, so
     /// that e.g. a misspelled slot `?foo` gets no hint).
     invalid_token: Option<char>,
     /// The hint applies to an `UnrecognizedToken` error for an identifier
