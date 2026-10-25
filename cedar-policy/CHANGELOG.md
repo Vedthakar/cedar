@@ -14,6 +14,10 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
+### Changed
+
+- Parse errors now suggest `&&`, `||` or `if`-`then`-`else` when a policy uses `and`/`AND`, `or`/`OR`, `&`, `|` or `?` as an operator. (#944)
+
 ### Fixed
 
 - Fixed `Entities::upsert_entities` keeping a stale ancestor when the same entity is given more than
