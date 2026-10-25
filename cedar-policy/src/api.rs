@@ -4962,6 +4962,97 @@ impl RestrictedExpression {
     }
 }
 
+impl RestrictedExpression {
+    /// Get what this restricted expression is, without evaluating it, e.g. to
+    /// serialize it in a custom format or to inspect it in tests.
+    ///
+    /// Set elements, record values and extension function arguments are
+    /// returned as (cloned) [`RestrictedExpression`]s, so they can be
+    /// inspected the same way.
+    ///
+    /// ```
+    /// # use cedar_policy::{RestrictedExpression, RestrictedExpressionKind};
+    /// # use std::str::FromStr;
+    /// let expr = RestrictedExpression::from_str(r#"[1, decimal("16.0")]"#).unwrap();
+    /// let RestrictedExpressionKind::Set(elements) = expr.kind() else { panic!() };
+    /// assert_eq!(elements[0].kind(), RestrictedExpressionKind::Long(1));
+    /// let RestrictedExpressionKind::ExtensionFunctionCall { name, args } = elements[1].kind() else { panic!() };
+    /// assert_eq!(name, "decimal");
+    /// assert_eq!(args[0].kind(), RestrictedExpressionKind::String("16.0".into()));
+    /// ```
+    pub fn kind(&self) -> RestrictedExpressionKind {
+        let owned = |e: ast::BorrowedRestrictedExpr<'_>| Self(e.to_owned());
+        match self.0.expr_kind() {
+            ast::ExprKind::Lit(ast::Literal::Bool(b)) => RestrictedExpressionKind::Bool(*b),
+            ast::ExprKind::Lit(ast::Literal::Long(i)) => RestrictedExpressionKind::Long(*i),
+            ast::ExprKind::Lit(ast::Literal::String(s)) => {
+                RestrictedExpressionKind::String(s.to_string())
+            }
+            ast::ExprKind::Lit(ast::Literal::EntityUID(euid)) => {
+                RestrictedExpressionKind::EntityUid(EntityUid(euid.as_ref().clone()))
+            }
+            _ => {
+                if let Some(elements) = self.0.as_set_elements() {
+                    RestrictedExpressionKind::Set(elements.map(owned).collect())
+                } else if let Some(pairs) = self.0.as_record_pairs() {
+                    RestrictedExpressionKind::Record(
+                        pairs.map(|(k, v)| (k.to_string(), owned(v))).collect(),
+                    )
+                } else if let Some((name, args)) = self.0.as_extn_fn_call() {
+                    RestrictedExpressionKind::ExtensionFunctionCall {
+                        name: name.to_string(),
+                        args: args.map(owned).collect(),
+                    }
+                } else if let Some(unknown) = self.0.as_unknown() {
+                    RestrictedExpressionKind::Unknown {
+                        name: unknown.name.to_string(),
+                    }
+                } else {
+                    #[expect(
+                        clippy::unreachable,
+                        reason = "a `RestrictedExpr` is always one of the forms above"
+                    )]
+                    {
+                        unreachable!("unexpected restricted expression: {self:?}")
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// What a [`RestrictedExpression`] is, as returned by
+/// [`RestrictedExpression::kind`]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RestrictedExpressionKind {
+    /// A boolean literal
+    Bool(bool),
+    /// A long (integer) literal
+    Long(i64),
+    /// A string literal
+    String(String),
+    /// An entity uid literal
+    EntityUid(EntityUid),
+    /// A set
+    Set(Vec<RestrictedExpression>),
+    /// A record
+    Record(BTreeMap<String, RestrictedExpression>),
+    /// A call to an extension function, e.g. `decimal("16.0")`
+    ExtensionFunctionCall {
+        /// The name of the function, e.g. `decimal`
+        name: String,
+        /// The arguments
+        args: Vec<RestrictedExpression>,
+    },
+    /// An unknown, as created by `RestrictedExpression::new_unknown` (with the
+    /// `partial-eval` feature)
+    Unknown {
+        /// The name of the unknown
+        name: String,
+    },
+}
+
 #[cfg(test)]
 impl RestrictedExpression {
     /// Deconstruct an [`RestrictedExpression`] to get the internal type.

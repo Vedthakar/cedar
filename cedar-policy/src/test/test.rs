@@ -9587,6 +9587,92 @@ mod to_json {
     }
 }
 
+/// `RestrictedExpression::kind` (#1151)
+mod restricted_expression_kind {
+    use crate::{EntityUid, RestrictedExpression, RestrictedExpressionKind};
+    use std::collections::BTreeMap;
+    use std::str::FromStr;
+
+    fn kind(src: &str) -> RestrictedExpressionKind {
+        RestrictedExpression::from_str(src).unwrap().kind()
+    }
+
+    #[test]
+    fn literals() {
+        assert_eq!(kind("true"), RestrictedExpressionKind::Bool(true));
+        assert_eq!(kind("-7"), RestrictedExpressionKind::Long(-7));
+        assert_eq!(
+            kind(r#""a\"b""#),
+            RestrictedExpressionKind::String("a\"b".to_string())
+        );
+        assert_eq!(
+            kind(r#"User::"alice""#),
+            RestrictedExpressionKind::EntityUid(EntityUid::from_str(r#"User::"alice""#).unwrap())
+        );
+    }
+
+    #[test]
+    fn sets_and_records() {
+        assert_eq!(
+            kind("[2, 1]"),
+            RestrictedExpressionKind::Set(vec![
+                RestrictedExpression::new_long(2),
+                RestrictedExpression::new_long(1),
+            ])
+        );
+        assert_eq!(kind("[]"), RestrictedExpressionKind::Set(vec![]));
+        assert_eq!(
+            kind(r#"{b: [true], "a b": {}}"#),
+            RestrictedExpressionKind::Record(BTreeMap::from([
+                (
+                    "b".to_string(),
+                    RestrictedExpression::new_set([RestrictedExpression::new_bool(true)])
+                ),
+                (
+                    "a b".to_string(),
+                    RestrictedExpression::new_record([]).unwrap()
+                ),
+            ]))
+        );
+    }
+
+    #[test]
+    fn extension_function_calls_keep_their_arguments() {
+        let RestrictedExpressionKind::ExtensionFunctionCall { name, args } =
+            RestrictedExpression::new_decimal("16.00").kind()
+        else {
+            panic!("expected an extension function call");
+        };
+        assert_eq!(name, "decimal");
+        // not evaluated, so `16.00` is not normalized
+        assert_eq!(
+            args,
+            vec![RestrictedExpression::new_string("16.00".to_string())]
+        );
+        assert_eq!(
+            kind(r#"ip("10.0.0.1").isInRange(ip("10.0.0.0/8"))"#),
+            RestrictedExpressionKind::ExtensionFunctionCall {
+                name: "isInRange".to_string(),
+                args: vec![
+                    RestrictedExpression::new_ip("10.0.0.1"),
+                    RestrictedExpression::new_ip("10.0.0.0/8"),
+                ],
+            }
+        );
+    }
+
+    #[cfg(feature = "partial-eval")]
+    #[test]
+    fn unknowns() {
+        assert_eq!(
+            RestrictedExpression::new_unknown("u").kind(),
+            RestrictedExpressionKind::Unknown {
+                name: "u".to_string()
+            }
+        );
+    }
+}
+
 mod test_entities_api {
     use std::collections::HashSet;
 
