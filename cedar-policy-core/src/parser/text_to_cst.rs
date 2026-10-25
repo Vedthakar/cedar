@@ -1469,6 +1469,94 @@ mod tests {
         );
     }
 
+    /// #944: hints for operators that other languages spell differently
+    #[test]
+    fn operator_hints() {
+        #[track_caller]
+        fn assert_hint(cond: &str, msg: &str, underline: &str, help: &str) {
+            let src = format!("permit(principal, action, resource) when {{ {cond} }};");
+            let errs = assert_parse_fails(parse_policies, &src);
+            let expected = ExpectedErrorMessageBuilder::error(msg).help(help);
+            let expected = if underline.is_empty() {
+                expected.exactly_one_underline(underline)
+            } else {
+                expected.exactly_one_underline_with_label(underline, EXPECTED_AFTER_ATTR)
+            };
+            expect_exactly_one_error(&src, &errs, &expected.build());
+        }
+        const EXPECTED_AFTER_ATTR: &str = "expected `!=`, `&&`, `(`, `*`, `+`, `-`, `.`, `<`, `<=`, `==`, `>`, `>=`, `[`, `||`, `}`, `has`, `in`, `is`, or `like`";
+        const AND: &str = "the logical and operator in Cedar is `&&`";
+        const OR: &str = "the logical or operator in Cedar is `||`";
+        assert_hint(
+            "principal.a AND principal.b",
+            "unexpected token `AND`",
+            "AND",
+            AND,
+        );
+        assert_hint(
+            "principal.a and principal.b",
+            "unexpected token `and`",
+            "and",
+            AND,
+        );
+        assert_hint(
+            "principal.a OR principal.b",
+            "unexpected token `OR`",
+            "OR",
+            OR,
+        );
+        assert_hint(
+            "principal.a or principal.b",
+            "unexpected token `or`",
+            "or",
+            OR,
+        );
+        assert_hint("principal.a & principal.b", "invalid token", "", AND);
+        assert_hint("principal.a | principal.b", "invalid token", "", OR);
+        assert_hint(
+            "principal.a ? 1 : 2",
+            "invalid token",
+            "",
+            "Cedar has no `?:` operator; try `if <condition> then <expr> else <expr>`",
+        );
+
+        assert_hint("principal.a&principal.b", "invalid token", "", AND);
+        assert_hint("principal.a|principal.b", "invalid token", "", OR);
+        assert_hint(
+            "principal.a ?1 : 2",
+            "invalid token",
+            "",
+            "Cedar has no `?:` operator; try `if <condition> then <expr> else <expr>`",
+        );
+        // Imprecise but intended: `and` right after a complete expression
+        // gets the hint, even inside a record literal
+        let src = "permit(principal, action, resource) when { {a: 1 and b: 2} == {} };";
+        let errs = assert_parse_fails(parse_policies, src);
+        expect_exactly_one_error(
+            src,
+            &errs,
+            &ExpectedErrorMessageBuilder::error("unexpected token `and`")
+                .exactly_one_underline_with_label(
+                    "and",
+                    "expected `!=`, `&&`, `(`, `*`, `+`, `,`, `-`, `.`, `<`, `<=`, `==`, `>`, `>=`, `[`, `||`, `}`, `has`, `in`, `is`, or `like`",
+                )
+                .help(AND)
+                .build(),
+        );
+
+        // no hints for `and` and `or` where no operator could go, e.g. as names
+        assert_parse_succeeds(
+            parse_policies,
+            r#"permit(principal, action, resource) when { principal.and == context.or && {and: 1, or: 2} == {} && principal is and };"#,
+        );
+        let src = "permit(principal, action, resource) when { principal.a andd principal.b };";
+        let errs = assert_parse_fails(parse_policies, src);
+        assert!(
+            errs.iter().all(|e| miette::Diagnostic::help(e).is_none()),
+            "unexpected help for {src}: {errs:?}"
+        );
+    }
+
     #[test]
     fn unclosed_strings() {
         #[track_caller]

@@ -696,13 +696,74 @@ impl Diagnostic for ToCSTError {
                     '\'' => Some(Box::new(
                         "strings must use double quotes, not single quotes",
                     )),
-                    _ => None,
+                    _ => OPERATOR_HINTS
+                        .iter()
+                        .find(|hint| {
+                            hint.invalid_token.is_some_and(|c| c == tok_last_char)
+                                // `?` followed by a letter or `_` is a
+                                // (possibly misspelled) slot like `?principal`
+                                && !(tok_last_char == '?'
+                                    && self
+                                        .src
+                                        .get(location + 1..)
+                                        .is_some_and(|rest| {
+                                            rest.starts_with(|c: char| {
+                                                c.is_alphabetic() || c == '_'
+                                            })
+                                        }))
+                        })
+                        .map(|hint| Box::new(hint.help) as Box<dyn Display>),
                 }
             }
+            OwnedRawParseError::UnrecognizedToken {
+                token: (_, ref token, _),
+                ref expected,
+            } => OPERATOR_HINTS
+                .iter()
+                .find(|hint| {
+                    hint.identifier.is_some_and(|(id, op)| {
+                        token.eq_ignore_ascii_case(id) && expected.iter().any(|e| e == op)
+                    })
+                })
+                .map(|hint| Box::new(hint.help) as Box<dyn Display>),
             _ => None,
         }
     }
 }
+
+/// A help message for an operator that other languages spell differently
+/// from Cedar (#944). Add an entry here to hint at another one.
+struct OperatorHint {
+    /// The hint applies to an `InvalidToken` error starting with this
+    /// character (except `?` immediately followed by a letter or `_`, so
+    /// that e.g. a misspelled slot `?foo` gets no hint).
+    invalid_token: Option<char>,
+    /// The hint applies to an `UnrecognizedToken` error for an identifier
+    /// equal to `.0` (ignoring ASCII case), but only if the parser expected
+    /// token `.1` at that point. That is, only where an operator could go,
+    /// so `and`/`or` used as attribute or entity type names get no hint.
+    identifier: Option<(&'static str, &'static str)>,
+    /// The help message
+    help: &'static str,
+}
+
+const OPERATOR_HINTS: &[OperatorHint] = &[
+    OperatorHint {
+        invalid_token: Some('&'),
+        identifier: Some(("and", "\"&&\"")),
+        help: "the logical and operator in Cedar is `&&`",
+    },
+    OperatorHint {
+        invalid_token: Some('|'),
+        identifier: Some(("or", "\"||\"")),
+        help: "the logical or operator in Cedar is `||`",
+    },
+    OperatorHint {
+        invalid_token: Some('?'),
+        identifier: None,
+        help: "Cedar has no `?:` operator; try `if <condition> then <expr> else <expr>`",
+    },
+];
 
 /// Defines configurable rules for how tokens in an `UnrecognizedToken` or
 /// `UnrecognizedEof` error should be displayed to users.
