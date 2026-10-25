@@ -238,6 +238,10 @@ pub enum ToASTErrorKind {
     #[error("invalid attribute name: {0}")]
     #[diagnostic(help("attribute names can either be identifiers or string literals"))]
     InvalidAttribute(SmolStr),
+    /// Returned when an attribute name is enclosed in parentheses, e.g. `{("a"): 1}`
+    #[error("invalid attribute name: ({0})")]
+    #[diagnostic(help("attribute names cannot be parenthesized; try `{0}` instead"))]
+    ParenthesizedAttribute(SmolStr),
     /// Returned when the RHS of a `has` operation is invalid
     #[error("invalid RHS of a `has` operation: {0}")]
     #[diagnostic(help("valid RHS of a `has` operation is either a sequence of identifiers separated by `.` or a string literal"))]
@@ -256,6 +260,10 @@ pub enum ToASTErrorKind {
     /// Returned when the right hand side of a `like` expression is not a constant pattern literal
     #[error("right hand side of a `like` expression must be a pattern literal, but got `{0}`")]
     InvalidPattern(String),
+    /// Returned when the right hand side of a `like` expression is a pattern literal in parentheses, e.g. `like ("*")`
+    #[error("right hand side of a `like` expression must be a pattern literal, but got `({0})`")]
+    #[diagnostic(help("patterns cannot be parenthesized; try `like {0}` instead"))]
+    ParenthesizedPattern(SmolStr),
     /// Returned when the right hand side of a `is` expression is not an entity type name
     #[error("right hand side of an `is` expression must be an entity type name, but got `{rhs}`")]
     #[diagnostic(help("{}", invalid_is_help(lhs, rhs)))]

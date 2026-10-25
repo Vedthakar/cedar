@@ -1141,6 +1141,17 @@ pub(crate) enum ExprOrSpecial<'a, Expr> {
     StrLit { lit: &'a SmolStr, loc: Option<Loc> },
     /// A boolean literal
     BoolLit { val: bool, loc: Option<Loc> },
+    /// A string literal or variable in parentheses, e.g. `("a")`. It behaves
+    /// like `Expr`, and is kept separate only to give better errors where an
+    /// attribute name or pattern is expected.
+    Parenthesized {
+        expr: Expr,
+        /// The source text without the parentheses, e.g. `"a"`
+        inner: SmolStr,
+        /// Whether the parenthesized item is a string literal
+        is_str: bool,
+        loc: Option<Loc>,
+    },
 }
 
 impl<Expr> ExprOrSpecial<'_, Expr>
@@ -1154,6 +1165,7 @@ where
             Self::Name { loc, .. } => loc.as_ref(),
             Self::StrLit { loc, .. } => loc.as_ref(),
             Self::BoolLit { loc, .. } => loc.as_ref(),
+            Self::Parenthesized { loc, .. } => loc.as_ref(),
         }
     }
 
@@ -1163,7 +1175,7 @@ where
 
     fn into_expr<Build: ExprBuilderInfallibleBuild<Expr = Expr>>(self) -> Result<Expr> {
         match self {
-            Self::Expr { expr, .. } => Ok(expr),
+            Self::Expr { expr, .. } | Self::Parenthesized { expr, .. } => Ok(expr),
             Self::Var { var, loc } => Ok(Build::new().with_maybe_source_loc(loc.as_ref()).var(var)),
             Self::Name { name, loc } => convert_expr_error_to_parse_error::<Build>(
                 ToASTError::new(
@@ -1203,6 +1215,9 @@ where
                 loc,
             )
             .into()),
+            Self::Parenthesized { inner, loc, .. } => {
+                Err(ToASTError::new(ToASTErrorKind::ParenthesizedAttribute(inner), loc).into())
+            }
             Self::BoolLit { val, loc } => Err(ToASTError::new(
                 ToASTErrorKind::ReservedIdentifier(if val {
                     cst::Ident::True
@@ -1228,8 +1243,20 @@ where
             Self::Name { name, .. } => Err(self
                 .to_ast_err(ToASTErrorKind::InvalidPattern(name.to_string()))
                 .into()),
-            Self::Expr { expr, .. } => Err(self
+            Self::Expr { expr, .. }
+            | Self::Parenthesized {
+                expr,
+                is_str: false,
+                ..
+            } => Err(self
                 .to_ast_err(ToASTErrorKind::InvalidPattern(expr.to_string()))
+                .into()),
+            Self::Parenthesized {
+                inner,
+                is_str: true,
+                ..
+            } => Err(self
+                .to_ast_err(ToASTErrorKind::ParenthesizedPattern(inner.clone()))
                 .into()),
             Self::BoolLit { val, .. } => Err(self
                 .to_ast_err(ToASTErrorKind::InvalidPattern(val.to_string()))
@@ -1250,7 +1277,7 @@ where
             Self::Name { name, .. } => Err(self
                 .to_ast_err(ToASTErrorKind::InvalidString(name.to_string()))
                 .into()),
-            Self::Expr { expr, .. } => Err(self
+            Self::Expr { expr, .. } | Self::Parenthesized { expr, .. } => Err(self
                 .to_ast_err(ToASTErrorKind::InvalidString(expr.to_string()))
                 .into()),
             Self::BoolLit { val, .. } => Err(self
@@ -1838,9 +1865,10 @@ impl Node<Option<cst::Member>> {
                 // literal). We will handle the possibility of multiple chained
                 // accesses on this expression in the loop at the end of this
                 // function.
-                (prim @ (Expr { .. } | StrLit { .. } | BoolLit { .. }), [next, rest @ ..]) => {
-                    self.build_expr_accessor::<Build>(prim.into_expr::<Build>()?, next, rest)?
-                }
+                (
+                    prim @ (Expr { .. } | Parenthesized { .. } | StrLit { .. } | BoolLit { .. }),
+                    [next, rest @ ..],
+                ) => self.build_expr_accessor::<Build>(prim.into_expr::<Build>()?, next, rest)?,
 
                 // function call
                 (Name { name, .. }, [Call(args), rest @ ..]) => {
@@ -2003,10 +2031,26 @@ impl Node<Option<cst::Primary>> {
                     })
                 }
             }
-            cst::Primary::Expr(e) => e.to_expr::<Build>().map(|expr| ExprOrSpecial::Expr {
-                expr,
-                loc: e.loc.clone(),
-            }),
+            cst::Primary::Expr(e) => {
+                let inner = e.to_expr_or_special::<Build>()?;
+                let special = match &inner {
+                    ExprOrSpecial::StrLit { lit, .. } => Some((format!("\"{lit}\"").into(), true)),
+                    ExprOrSpecial::Var { var, .. } => Some((var.to_string().into(), false)),
+                    _ => None,
+                };
+                inner.into_expr::<Build>().map(|expr| match special {
+                    Some((inner, is_str)) => ExprOrSpecial::Parenthesized {
+                        expr,
+                        inner,
+                        is_str,
+                        loc: e.loc.clone(),
+                    },
+                    None => ExprOrSpecial::Expr {
+                        expr,
+                        loc: e.loc.clone(),
+                    },
+                })
+            }
             cst::Primary::EList(es) => {
                 let maybe_list = ParseErrors::transpose(es.iter().map(|e| e.to_expr::<Build>()));
                 maybe_list.map(|list| ExprOrSpecial::Expr {
@@ -3193,6 +3237,64 @@ mod tests {
                 .exactly_one_underline("1")
                 .build(),
         );
+    }
+
+    /// #1093, #247: parenthesized attribute names and patterns
+    #[test]
+    fn parenthesized_attribute_and_pattern() {
+        for (src, attr) in [
+            (r#"{("attr"): 1}"#, r#""attr""#),
+            ("{(principal): 1}", "principal"),
+        ] {
+            let errs = assert_parse_expr_fails(src);
+            expect_n_errors(src, &errs, 1);
+            expect_some_error_matches(
+                src,
+                &errs,
+                &ExpectedErrorMessageBuilder::error(&format!("invalid attribute name: ({attr})"))
+                    .help(&format!(
+                        "attribute names cannot be parenthesized; try `{attr}` instead"
+                    ))
+                    .exactly_one_underline(attr)
+                    .build(),
+            );
+        }
+
+        let src = r#"principal like ("*")"#;
+        let errs = assert_parse_expr_fails(src);
+        expect_n_errors(src, &errs, 1);
+        expect_some_error_matches(
+            src,
+            &errs,
+            &ExpectedErrorMessageBuilder::error(r#"right hand side of a `like` expression must be a pattern literal, but got `("*")`"#)
+                .help(r#"patterns cannot be parenthesized; try `like "*"` instead"#)
+                .exactly_one_underline(r#""*""#)
+                .build(),
+        );
+
+        // other parenthesized expressions keep their existing errors
+        let src = "{(1 + 1): 1}";
+        let errs = assert_parse_expr_fails(src);
+        expect_some_error_matches(
+            src,
+            &errs,
+            &ExpectedErrorMessageBuilder::error("invalid attribute name: 1 + 1")
+                .help("attribute names can either be identifiers or string literals")
+                .exactly_one_underline("1 + 1")
+                .build(),
+        );
+        let src = "principal like (principal)";
+        let errs = assert_parse_expr_fails(src);
+        expect_some_error_matches(
+            src,
+            &errs,
+            &ExpectedErrorMessageBuilder::error("right hand side of a `like` expression must be a pattern literal, but got `principal`")
+                .exactly_one_underline("principal")
+                .build(),
+        );
+
+        // and parenthesized values elsewhere still parse
+        assert_parse_expr_succeeds(r#"{a: ("b")} == {} && (principal).foo == 1 && ("x") like "*""#);
     }
 
     #[test]
