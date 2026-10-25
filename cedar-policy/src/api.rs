@@ -4966,9 +4966,10 @@ impl RestrictedExpression {
     /// Get what this restricted expression is, without evaluating it, e.g. to
     /// serialize it in a custom format or to inspect it in tests.
     ///
-    /// Set elements, record values and extension function arguments are
-    /// returned as (cloned) [`RestrictedExpression`]s, so they can be
-    /// inspected the same way.
+    /// This is shallow: it only describes the outermost expression. Set
+    /// elements, record values and extension function arguments are returned
+    /// as (cloned) [`RestrictedExpression`]s, so call `kind()` on them to
+    /// inspect further.
     ///
     /// ```
     /// # use cedar_policy::{RestrictedExpression, RestrictedExpressionKind};
