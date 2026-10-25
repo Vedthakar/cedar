@@ -14,6 +14,10 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
+### Added
+
+- `RestrictedExpression::kind()` and `RestrictedExpressionKind`, to inspect a restricted expression (literal, entity uid, set, record, extension function call or unknown) without evaluating it. (#1151)
+
 ### Fixed
 
 - Fixed `Entities::upsert_entities` keeping a stale ancestor when the same entity is given more than
