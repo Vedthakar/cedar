@@ -1874,7 +1874,9 @@ impl SchemaFragment {
     ///
     /// Unlike [`SchemaFragment::to_json_value`], the result never contains
     /// `"type": "EntityOrCommon"`. This is the same resolution as
-    /// [`schema_str_to_json_with_resolved_types`].
+    /// [`schema_str_to_json_with_resolved_types`]. To serialize a whole
+    /// validated [`Schema`] instead of one fragment, see `Schema::to_json_value`
+    /// and `Schema::to_json_string` (#500).
     ///
     /// # Errors
     ///
@@ -2505,6 +2507,53 @@ mod test_schema_str_to_json_with_resolved_types {
             original.entity_types().collect::<HashSet<_>>(),
             round_tripped.entity_types().collect::<HashSet<_>>()
         );
+    }
+
+    /// A user-defined `Long` entity type shadows the builtin: the bare name
+    /// resolves to the entity type, `__cedar::Long` to the builtin.
+    #[test]
+    fn schema_fragment_to_json_with_resolved_types_shadowed_builtin() {
+        let (fragment, _) = SchemaFragment::from_cedarschema_str(
+            r#"entity Long; entity User = { "level": Long, "age": __cedar::Long };"#,
+        )
+        .unwrap();
+        let value = fragment.to_json_value_with_resolved_types().unwrap();
+        let attrs = &value[""]["entityTypes"]["User"]["shape"]["attributes"];
+        assert_eq!(
+            attrs["level"],
+            serde_json::json!({"type": "Entity", "name": "Long"})
+        );
+        assert_eq!(attrs["age"], serde_json::json!({"type": "__cedar::Long"}));
+        let round_tripped = SchemaFragment::from_json_value(value).unwrap();
+        let _: Schema = round_tripped.try_into().unwrap();
+    }
+
+    /// References inside a namespace resolve to fully qualified names.
+    #[test]
+    fn schema_fragment_to_json_with_resolved_types_namespaced() {
+        let (fragment, _) = SchemaFragment::from_cedarschema_str(
+            r#"namespace App {
+                type Info = { "n": String };
+                entity Group;
+                entity User in [Group] = { "info": Info, "boss": User, "group": App::Group };
+            }"#,
+        )
+        .unwrap();
+        let resolved = fragment.to_json_string_with_resolved_types().unwrap();
+        assert!(!resolved.contains("EntityOrCommon"), "{resolved}");
+        let value: serde_json::Value = serde_json::from_str(&resolved).unwrap();
+        let attrs = &value["App"]["entityTypes"]["User"]["shape"]["attributes"];
+        assert_eq!(attrs["info"], serde_json::json!({"type": "App::Info"}));
+        assert_eq!(
+            attrs["boss"],
+            serde_json::json!({"type": "Entity", "name": "App::User"})
+        );
+        assert_eq!(
+            attrs["group"],
+            serde_json::json!({"type": "Entity", "name": "App::Group"})
+        );
+        let round_tripped = SchemaFragment::from_json_str(&resolved).unwrap();
+        let _: Schema = round_tripped.try_into().unwrap();
     }
 
     #[test]
