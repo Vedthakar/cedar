@@ -14,6 +14,11 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
+### Added
+
+- `SchemaFragment::to_json_value_with_resolved_types` and `SchemaFragment::to_json_string_with_resolved_types`,
+  which serialize a schema fragment as JSON with no `EntityOrCommon` types (#1161).
+
 ### Fixed
 
 - Fixed `Entities::upsert_entities` keeping a stale ancestor when the same entity is given more than
