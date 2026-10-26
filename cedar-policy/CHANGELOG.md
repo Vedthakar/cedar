@@ -14,6 +14,11 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
+### Added
+
+- `Schema::namespaces()` and `Schema::common_types()`, which list the namespaces and the names of the common types
+  a schema declares, without needing the `extended-schema` feature (#1071).
+
 ### Fixed
 
 - Fixed `Entities::upsert_entities` keeping a stale ancestor when the same entity is given more than

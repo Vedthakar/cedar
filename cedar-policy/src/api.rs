@@ -2144,6 +2144,59 @@ impl Schema {
             .map(|ety| RefCast::ref_cast(ety.name()))
     }
 
+    /// Returns an iterator over the namespaces declared in this schema.
+    ///
+    /// `None` indicates the empty namespace. Each namespace is listed once,
+    /// even if it was declared in several fragments, and in no particular
+    /// order. Schemas built by [`Schema::schema_link`] list none.
+    ///
+    /// ```
+    /// # use cedar_policy::{EntityNamespace, Schema};
+    /// # use std::str::FromStr;
+    /// let (schema, _) = Schema::from_cedarschema_str(r#"
+    ///     entity User;
+    ///     namespace App { entity Doc; }
+    /// "#).unwrap();
+    /// let mut namespaces: Vec<_> = schema.namespaces().collect();
+    /// namespaces.sort();
+    /// assert_eq!(namespaces, [None, Some(EntityNamespace::from_str("App").unwrap())]);
+    /// ```
+    pub fn namespaces(&self) -> impl Iterator<Item = Option<EntityNamespace>> + '_ {
+        // Names with reserved `__cedar` components (the builtin namespace) are
+        // an implementation detail and fail the conversion to `ast::Name`.
+        self.0.namespace_names().filter_map(|ns| {
+            ns.map_or(Some(None), |ns| {
+                ast::Name::try_from(ns.clone())
+                    .ok()
+                    .map(|n| Some(EntityNamespace(n)))
+            })
+        })
+    }
+
+    /// Returns an iterator over the fully qualified names of the common types
+    /// declared in this schema, such as `"App::Task"`.
+    ///
+    /// Common types are inlined when the schema is built, so this only lists
+    /// their names. Builtin types such as `Long` are not included. The order is
+    /// unspecified. Schemas built by [`Schema::schema_link`] list none.
+    ///
+    /// ```
+    /// # use cedar_policy::Schema;
+    /// let (schema, _) = Schema::from_cedarschema_str(r#"
+    ///     type Name = String;
+    ///     namespace App { type Task = { "name": Name }; entity Doc = { "task": Task }; }
+    /// "#).unwrap();
+    /// let mut names: Vec<_> = schema.common_types().collect();
+    /// names.sort();
+    /// assert_eq!(names, ["App::Task", "Name"]);
+    /// ```
+    pub fn common_types(&self) -> impl Iterator<Item = String> + '_ {
+        self.0
+            .common_type_names()
+            .filter_map(|name| ast::Name::try_from(name.clone()).ok())
+            .map(|name| name.to_string())
+    }
+
     /// Returns an iterator over all actions declared in this schema,
     /// including both external and non-external (defined) actions.
     ///
