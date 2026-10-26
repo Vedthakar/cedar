@@ -282,8 +282,15 @@ impl Validator {
                 self.check_if_in_fixes_principal(principal_constraint, action_constraint);
             let would_in_fix_resource =
                 self.check_if_in_fixes_resource(resource_constraint, action_constraint);
+            // When the help text points at exactly one scope clause, point the
+            // diagnostic at that clause instead of the whole policy.
+            let loc = match (would_in_fix_principal, would_in_fix_resource) {
+                (true, false) => principal_constraint.source_loc().or(source_loc),
+                (false, true) => resource_constraint.source_loc().or(source_loc),
+                _ => source_loc,
+            };
             Err(ValidationWarning::invalid_action_application(
-                source_loc.cloned(),
+                loc.cloned(),
                 policy_id.clone(),
                 would_in_fix_principal,
                 would_in_fix_resource,
@@ -1329,6 +1336,61 @@ mod test {
             .exactly_one_underline(src)
             .build(),
         );
+    }
+
+    /// When the help text points at one scope clause, the warning should
+    /// point at that clause rather than at the whole policy (#521).
+    #[test]
+    fn invalid_action_application_points_at_scope_clause() {
+        let (schema, _) = ValidatorSchema::from_cedarschema_str(
+            r#"
+            entity Group;
+            entity User in [Group];
+            entity Doc in [Group];
+            action view appliesTo { principal: [User], resource: [Doc] };
+            "#,
+            crate::extensions::Extensions::all_available(),
+        )
+        .unwrap();
+        let validator = Validator::new(schema);
+
+        let cases = [
+            (
+                r#"permit(principal == Group::"g", action == Action::"view", resource);"#,
+                r#"principal == Group::"g""#,
+                true,
+                false,
+            ),
+            (
+                r#"permit(principal, action == Action::"view", resource == Group::"g");"#,
+                r#"resource == Group::"g""#,
+                false,
+                true,
+            ),
+        ];
+        for (src, clause, fix_principal, fix_resource) in cases {
+            let policy = parse_policy_or_template(None, src).unwrap();
+            let start = src.find(clause).unwrap();
+            assert_eq!(
+                validator
+                    .validate_policy(&policy, ValidationMode::default())
+                    .1
+                    .collect::<Vec<ValidationWarning>>(),
+                vec![
+                    ValidationWarning::invalid_action_application(
+                        Some(Loc::new(start..start + clause.len(), Arc::from(src))),
+                        policy.id().clone(),
+                        fix_principal,
+                        fix_resource,
+                    ),
+                    ValidationWarning::impossible_policy(
+                        policy.loc().cloned(),
+                        policy.id().clone()
+                    ),
+                ],
+                "{src}"
+            );
+        }
     }
 
     #[test]
