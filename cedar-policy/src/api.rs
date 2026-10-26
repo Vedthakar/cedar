@@ -2148,7 +2148,7 @@ impl Schema {
     ///
     /// `None` indicates the empty namespace. Each namespace is listed once,
     /// even if it was declared in several fragments, and in no particular
-    /// order. Schemas built by [`Schema::schema_link`] list none.
+    /// order.
     ///
     /// ```
     /// # use cedar_policy::{EntityNamespace, Schema};
@@ -2178,7 +2178,7 @@ impl Schema {
     ///
     /// Common types are inlined when the schema is built, so this only lists
     /// their names. Builtin types such as `Long` are not included. The order is
-    /// unspecified. Schemas built by [`Schema::schema_link`] list none.
+    /// unspecified.
     ///
     /// ```
     /// # use cedar_policy::Schema;

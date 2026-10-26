@@ -12872,6 +12872,22 @@ mod schema_namespaces_and_common_types {
     }
 
     #[test]
+    fn linked_schema_keeps_namespaces_and_common_types() {
+        let (a, _) = Schema::from_cedarschema_str(
+            r#"namespace A { type T = Long; entity E = { "t": T }; }"#,
+        )
+        .unwrap();
+        let (b, _) =
+            Schema::from_cedarschema_str(r#"type U = String; namespace B { entity F; }"#).unwrap();
+        let linked = Schema::schema_link([a, b]).unwrap();
+        assert_eq!(
+            sorted(linked.namespaces()),
+            sorted([None, ns("A"), ns("B")].into_iter())
+        );
+        assert_eq!(sorted(linked.common_types()), ["A::T", "U"]);
+    }
+
+    #[test]
     fn from_json_and_several_fragments() {
         let json = SchemaFragment::from_json_str(
             r#"{ "A": {

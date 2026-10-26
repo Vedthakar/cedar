@@ -432,6 +432,18 @@ impl ValidatorSchema {
         self.namespace_names.iter().map(Option::as_ref)
     }
 
+    /// Replace the declared namespaces and common type names, which
+    /// rebuilding a schema from its entity types and actions does not keep
+    pub(crate) fn with_declared_names(
+        mut self,
+        namespace_names: HashSet<Option<InternalName>>,
+        common_type_names: HashSet<InternalName>,
+    ) -> Self {
+        self.namespace_names = namespace_names;
+        self.common_type_names = common_type_names;
+        self
+    }
+
     /// Returns an iterator over every entity type that can be a principal for any action in this schema
     pub fn principals(&self) -> impl Iterator<Item = &EntityType> {
         self.action_ids

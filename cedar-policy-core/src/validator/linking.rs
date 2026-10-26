@@ -142,7 +142,13 @@ impl<'a> Linker<'a> {
         let mut declared_by: HashMap<EntityType, usize> = HashMap::new();
         let mut action_types: HashSet<&EntityType> = HashSet::new();
         let mut total_actions = 0_usize;
+        // The linked schema declares every namespace and common type an input
+        // declares.
+        let mut namespace_names = HashSet::new();
+        let mut common_type_names = HashSet::new();
         for schema in &schemas {
+            namespace_names.extend(schema.namespace_names().map(|ns| ns.cloned()));
+            common_type_names.extend(schema.common_type_names().cloned());
             for ety in schema.entity_type_names() {
                 *declared_by.entry(ety.clone()).or_default() += 1;
             }
@@ -189,7 +195,7 @@ impl<'a> Linker<'a> {
         // Validating also closes it, which is the closure the next check reads.
         let linked = linked.try_validate()?;
         check_ancestors_unchanged(&defined_parents, &linked)?;
-        Ok(linked)
+        Ok(linked.with_declared_names(namespace_names, common_type_names))
     }
 }
 
