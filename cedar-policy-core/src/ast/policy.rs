@@ -1282,47 +1282,16 @@ impl std::fmt::Display for TemplateBody {
 }
 
 /// Template constraint on principal scope variables
-#[derive(Clone)]
+#[derive(Educe, Clone, Debug, Eq)]
+#[educe(Hash, PartialEq, PartialOrd, Ord)]
 pub struct PrincipalConstraint {
     pub(crate) constraint: PrincipalOrResourceConstraint,
-    /// Source location of the scope clause, if known. Not part of equality,
-    /// ordering or hashing.
+    /// Source location of the scope clause, if known
+    #[educe(PartialEq(ignore))]
+    #[educe(PartialOrd(ignore))]
+    #[educe(Ord(ignore))]
+    #[educe(Hash(ignore))]
     pub(crate) loc: Option<Loc>,
-}
-
-impl PartialEq for PrincipalConstraint {
-    fn eq(&self, other: &Self) -> bool {
-        self.constraint == other.constraint
-    }
-}
-
-impl Eq for PrincipalConstraint {}
-
-impl std::hash::Hash for PrincipalConstraint {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.constraint.hash(state);
-    }
-}
-
-impl PartialOrd for PrincipalConstraint {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for PrincipalConstraint {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.constraint.cmp(&other.constraint)
-    }
-}
-
-impl std::fmt::Debug for PrincipalConstraint {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // `loc` is left out, like it is from equality
-        f.debug_struct("PrincipalConstraint")
-            .field("constraint", &self.constraint)
-            .finish()
-    }
 }
 
 impl PrincipalConstraint {
@@ -1463,47 +1432,16 @@ impl std::fmt::Display for PrincipalConstraint {
 }
 
 /// Template constraint on resource scope variables
-#[derive(Clone)]
+#[derive(Educe, Clone, Debug, Eq)]
+#[educe(Hash, PartialEq, PartialOrd, Ord)]
 pub struct ResourceConstraint {
     pub(crate) constraint: PrincipalOrResourceConstraint,
-    /// Source location of the scope clause, if known. Not part of equality,
-    /// ordering or hashing.
+    /// Source location of the scope clause, if known
+    #[educe(PartialEq(ignore))]
+    #[educe(PartialOrd(ignore))]
+    #[educe(Ord(ignore))]
+    #[educe(Hash(ignore))]
     pub(crate) loc: Option<Loc>,
-}
-
-impl PartialEq for ResourceConstraint {
-    fn eq(&self, other: &Self) -> bool {
-        self.constraint == other.constraint
-    }
-}
-
-impl Eq for ResourceConstraint {}
-
-impl std::hash::Hash for ResourceConstraint {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.constraint.hash(state);
-    }
-}
-
-impl PartialOrd for ResourceConstraint {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for ResourceConstraint {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.constraint.cmp(&other.constraint)
-    }
-}
-
-impl std::fmt::Debug for ResourceConstraint {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // `loc` is left out, like it is from equality
-        f.debug_struct("ResourceConstraint")
-            .field("constraint", &self.constraint)
-            .finish()
-    }
 }
 
 impl ResourceConstraint {
