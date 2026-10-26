@@ -296,6 +296,16 @@ pub struct ValidatorSchema {
     /// to qualify type definitions when constructing the schema, so this does
     /// not contain any information used during typechecking.
     namespaces: HashSet<LocatedNamespace>,
+
+    #[educe(PartialEq(ignore))]
+    /// Fully qualified names of the common types declared in the schema. Like
+    /// `common_types`, this is not used during typechecking.
+    common_type_names: HashSet<InternalName>,
+
+    #[educe(PartialEq(ignore))]
+    /// Namespaces declared in the schema, with `None` for the empty namespace.
+    /// Like `namespaces`, this is not used during typechecking.
+    namespace_names: HashSet<Option<InternalName>>,
 }
 
 /// Construct [`ValidatorSchema`] from a string containing a schema formatted
@@ -393,6 +403,8 @@ impl ValidatorSchema {
             common_types,
             #[cfg(feature = "extended-schema")]
             namespaces,
+            common_type_names: HashSet::new(),
+            namespace_names: HashSet::new(),
         }
     }
 
@@ -406,6 +418,30 @@ impl ValidatorSchema {
     #[cfg(feature = "extended-schema")]
     pub fn namespaces(&self) -> impl Iterator<Item = &LocatedNamespace> {
         self.namespaces.iter()
+    }
+
+    /// Returns the fully qualified names of the common types declared in the
+    /// schema, including builtin ones in the `__cedar` namespace
+    pub fn common_type_names(&self) -> impl Iterator<Item = &InternalName> {
+        self.common_type_names.iter()
+    }
+
+    /// Returns the namespaces declared in the schema, with `None` for the
+    /// empty namespace. Includes the builtin `__cedar` namespace.
+    pub fn namespace_names(&self) -> impl Iterator<Item = Option<&InternalName>> {
+        self.namespace_names.iter().map(Option::as_ref)
+    }
+
+    /// Replace the declared namespaces and common type names, which
+    /// rebuilding a schema from its entity types and actions does not keep
+    pub(crate) fn with_declared_names(
+        mut self,
+        namespace_names: HashSet<Option<InternalName>>,
+        common_type_names: HashSet<InternalName>,
+    ) -> Self {
+        self.namespace_names = namespace_names;
+        self.common_type_names = common_type_names;
+        self
     }
 
     /// Returns an iterator over every entity type that can be a principal for any action in this schema
@@ -566,6 +602,8 @@ impl ValidatorSchema {
             common_types: HashSet::new(),
             #[cfg(feature = "extended-schema")]
             namespaces: HashSet::new(),
+            common_type_names: HashSet::new(),
+            namespace_names: HashSet::new(),
         }
     }
 
@@ -664,6 +702,10 @@ impl ValidatorSchema {
 
         // Build the sets of all entity type, common type, and action definitions
         // (fully-qualified names) in all fragments.
+        let namespace_names: HashSet<Option<InternalName>> = fragments
+            .iter()
+            .flat_map(|f| f.namespaces().map(|ns| ns.cloned()))
+            .collect();
         let mut all_defs = AllDefs::new(|| fragments.iter());
 
         // Now we have enough information to do the checks required by RFC 70.
@@ -675,6 +717,9 @@ impl ValidatorSchema {
         // definitions in the empty namespace are the ones the user has put there, which
         // are thus subject to RFC 70 shadowing rules.
         all_defs.rfc_70_shadowing_checks()?;
+        // The fragments after this point are the builtin aliases added below,
+        // which are not common types the user declared.
+        let num_declared_fragments = fragments.len();
 
         // Add aliases for primitive and extension typenames in the empty namespace,
         // so that they can be accessed without `__cedar`.
@@ -723,10 +768,18 @@ impl ValidatorSchema {
         // the same base type name may appear multiple times so long as the
         // namespaces are different.
         let mut common_types = HashMap::new();
+        let mut common_type_names = HashSet::new();
         let mut entity_type_fragments: HashMap<EntityType, _> = HashMap::new();
         let mut action_fragments = HashMap::new();
-        for ns_def in fragments.into_iter().flat_map(|f| f.0.into_iter()) {
+        for (i, ns_def) in fragments
+            .into_iter()
+            .enumerate()
+            .flat_map(|(i, f)| f.0.into_iter().map(move |ns_def| (i, ns_def)))
+        {
             for (name, ty) in ns_def.common_types.defs {
+                if i < num_declared_fragments {
+                    common_type_names.insert(name.clone());
+                }
                 match common_types.entry(name) {
                     Entry::Vacant(v) => v.insert(ty),
                     Entry::Occupied(o) => {
@@ -937,14 +990,17 @@ impl ValidatorSchema {
             action_children.into_keys(),
             common_types.into_values(),
         )?;
-        Ok(ValidatorSchema::new_from_maps(
+        let mut schema = ValidatorSchema::new_from_maps(
             entity_types,
             action_ids,
             #[cfg(feature = "extended-schema")]
             located_common_types,
             #[cfg(feature = "extended-schema")]
             validator_namespaces,
-        ))
+        );
+        schema.common_type_names = common_type_names;
+        schema.namespace_names = namespace_names;
+        Ok(schema)
     }
 
     /// Check that all entity types and actions referenced in the schema are in

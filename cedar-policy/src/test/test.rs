@@ -12819,3 +12819,88 @@ mod validation_result_display_tests {
         assert_same(src);
     }
 }
+
+/// `Schema::namespaces` and `Schema::common_types` (#1071), which work with or
+/// without the `extended-schema` feature
+mod schema_namespaces_and_common_types {
+    use crate::{EntityNamespace, Schema, SchemaFragment};
+    use std::str::FromStr;
+
+    fn sorted<T: Ord>(it: impl Iterator<Item = T>) -> Vec<T> {
+        let mut v: Vec<T> = it.collect();
+        v.sort();
+        v
+    }
+
+    fn ns(s: &str) -> Option<EntityNamespace> {
+        Some(EntityNamespace::from_str(s).unwrap())
+    }
+
+    #[test]
+    fn multiple_namespaces() {
+        let (schema, _) = Schema::from_cedarschema_str(
+            r#"
+            type Id = String;
+            entity User = { "id": Id };
+            namespace App {
+                type Task = { "name": String, "owner": User };
+                entity Doc = { "task": Task };
+            }
+            namespace App::Admin {
+                type Level = Long;
+                action manage;
+            }
+            namespace Empty {}
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            sorted(schema.namespaces()),
+            sorted([None, ns("App"), ns("App::Admin"), ns("Empty")].into_iter())
+        );
+        assert_eq!(
+            sorted(schema.common_types()),
+            ["App::Admin::Level", "App::Task", "Id"]
+        );
+    }
+
+    #[test]
+    fn no_common_types_and_only_empty_namespace() {
+        let (schema, _) = Schema::from_cedarschema_str("entity User;").unwrap();
+        assert_eq!(sorted(schema.namespaces()), [None]);
+        assert_eq!(schema.common_types().count(), 0);
+    }
+
+    #[test]
+    fn linked_schema_keeps_namespaces_and_common_types() {
+        let (a, _) = Schema::from_cedarschema_str(
+            r#"namespace A { type T = Long; entity E = { "t": T }; }"#,
+        )
+        .unwrap();
+        let (b, _) =
+            Schema::from_cedarschema_str(r#"type U = String; namespace B { entity F; }"#).unwrap();
+        let linked = Schema::schema_link([a, b]).unwrap();
+        assert_eq!(
+            sorted(linked.namespaces()),
+            sorted([None, ns("A"), ns("B")].into_iter())
+        );
+        assert_eq!(sorted(linked.common_types()), ["A::T", "U"]);
+    }
+
+    #[test]
+    fn from_json_and_several_fragments() {
+        let json = SchemaFragment::from_json_str(
+            r#"{ "A": {
+                "commonTypes": { "T": { "type": "Long" } },
+                "entityTypes": { "E": { "shape": { "type": "Record", "attributes": { "t": { "type": "T" } } } } },
+                "actions": {}
+            } }"#,
+        )
+        .unwrap();
+        let (cedar, _) =
+            SchemaFragment::from_cedarschema_str("namespace B { type U = String; }").unwrap();
+        let schema = Schema::from_schema_fragments([json, cedar]).unwrap();
+        assert_eq!(sorted(schema.namespaces()), [ns("A"), ns("B")]);
+        assert_eq!(sorted(schema.common_types()), ["A::T", "B::U"]);
+    }
+}
