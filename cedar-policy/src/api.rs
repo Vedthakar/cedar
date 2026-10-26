@@ -1869,6 +1869,38 @@ impl SchemaFragment {
         serde_json::to_string(&self.lossless).map_err(|e| SchemaError::JsonSerialization(e.into()))
     }
 
+    /// Serialize this [`SchemaFragment`] as a JSON value, with every type
+    /// reference resolved to an entity type, a common type or a builtin type.
+    ///
+    /// Unlike [`SchemaFragment::to_json_value`], the result never contains
+    /// `"type": "EntityOrCommon"`. This is the same resolution as
+    /// [`schema_str_to_json_with_resolved_types`].
+    ///
+    /// # Errors
+    ///
+    /// Fails if the fragment refers to a type it does not define, since that
+    /// reference cannot be resolved.
+    pub fn to_json_value_with_resolved_types(&self) -> Result<serde_json::Value, SchemaError> {
+        let resolved = self
+            .lossless
+            .to_internal_name_fragment_with_resolved_types()?;
+        serde_json::to_value(resolved).map_err(|e| SchemaError::JsonSerialization(e.into()))
+    }
+
+    /// Serialize this [`SchemaFragment`] as a JSON string, with every type
+    /// reference resolved. See
+    /// [`SchemaFragment::to_json_value_with_resolved_types`].
+    ///
+    /// # Errors
+    ///
+    /// Fails if the fragment refers to a type it does not define.
+    pub fn to_json_string_with_resolved_types(&self) -> Result<String, SchemaError> {
+        let resolved = self
+            .lossless
+            .to_internal_name_fragment_with_resolved_types()?;
+        serde_json::to_string(&resolved).map_err(|e| SchemaError::JsonSerialization(e.into()))
+    }
+
     /// Serialize this [`SchemaFragment`] into a string in the Cedar schema
     /// syntax
     pub fn to_cedarschema(&self) -> Result<String, ToCedarSchemaError> {
@@ -2410,6 +2442,79 @@ mod test_schema_str_to_json_with_resolved_types {
             }
             Err(e) => panic!("Expected success but got error: {:?}", e),
         }
+    }
+
+    /// `SchemaFragment::to_json_string` keeps `EntityOrCommon` references
+    /// (#1161); the `_with_resolved_types` variants resolve them.
+    #[test]
+    fn schema_fragment_to_json_with_resolved_types() {
+        // Shaped like the TinyTodo schema from #1161
+        let src = r#"
+            type Task = { "id": Long, "name": String, "state": String };
+            type Tasks = Set<Task>;
+            entity Application;
+            entity Team in [Team, Application];
+            entity User in [Team, Application] = { "joblevel": Long, "location": String };
+            entity List in [Application] = {
+                "editors": Team, "name": String, "owner": User, "readers": Team, "tasks": Tasks,
+            };
+            action GetList appliesTo { principal: [User], resource: [List] };
+        "#;
+        let (fragment, _) = SchemaFragment::from_cedarschema_str(src).unwrap();
+
+        // Existing behaviour is unchanged
+        assert!(fragment
+            .to_json_string()
+            .unwrap()
+            .contains("EntityOrCommon"));
+
+        let resolved = fragment.to_json_string_with_resolved_types().unwrap();
+        assert!(!resolved.contains("EntityOrCommon"), "{resolved}");
+        let value = fragment.to_json_value_with_resolved_types().unwrap();
+        assert_eq!(
+            value,
+            serde_json::from_str::<serde_json::Value>(&resolved).unwrap()
+        );
+        let attrs = &value[""]["commonTypes"]["Task"]["attributes"];
+        assert_eq!(attrs["id"]["type"], "Long");
+        assert_eq!(value[""]["commonTypes"]["Tasks"]["element"]["type"], "Task");
+        let list = &value[""]["entityTypes"]["List"]["shape"]["attributes"];
+        assert_eq!(list["owner"]["type"], "Entity");
+        assert_eq!(list["owner"]["name"], "User");
+        assert_eq!(list["tasks"]["type"], "Tasks");
+
+        // Round trip: the resolved JSON describes the same schema
+        let round_tripped = SchemaFragment::from_json_str(&resolved).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&round_tripped.to_json_string().unwrap())
+                .unwrap(),
+            value
+        );
+        // A JSON primitive type prints with its `__cedar::` prefix; otherwise
+        // the Cedar text is identical.
+        assert_eq!(
+            round_tripped
+                .to_cedarschema()
+                .unwrap()
+                .replace("__cedar::", ""),
+            fragment.to_cedarschema().unwrap()
+        );
+        let original: Schema = fragment.try_into().unwrap();
+        let round_tripped: Schema = round_tripped.try_into().unwrap();
+        assert_eq!(
+            original.entity_types().collect::<HashSet<_>>(),
+            round_tripped.entity_types().collect::<HashSet<_>>()
+        );
+    }
+
+    #[test]
+    fn schema_fragment_to_json_with_resolved_types_unresolved() {
+        let (fragment, _) =
+            SchemaFragment::from_cedarschema_str(r#"entity User = { "name": MyName };"#).unwrap();
+        assert!(matches!(
+            fragment.to_json_string_with_resolved_types(),
+            Err(SchemaError::TypeNotDefined(_))
+        ));
     }
 }
 
