@@ -1296,6 +1296,9 @@ mod tests {
                                 ),
                             ),
                         ),
+                        loc: Some(
+                            Loc(`principal is User`),
+                        ),
                     },
                     action_constraint: Eq(
                         EntityUID(
@@ -1321,6 +1324,9 @@ mod tests {
                     ),
                     resource_constraint: ResourceConstraint {
                         constraint: Any,
+                        loc: Some(
+                            Loc(`resource`),
+                        ),
                     },
                     non_scope_constraints: Some(
                         Expr {

@@ -14,6 +14,11 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
+### Changed
+
+- The validator's "unable to find an applicable action" warning now points at the principal or resource
+  scope clause, instead of the whole policy, when its help text names that clause (part of #521).
+
 ### Fixed
 
 - Fixed `Entities::upsert_entities` keeping a stale ancestor when the same entity is given more than

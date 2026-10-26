@@ -843,7 +843,7 @@ impl Node<Option<cst::VariableDef>> {
         tolerant_setting: TolerantAstSetting,
     ) -> Result<PrincipalConstraint> {
         match self.to_principal_or_resource_constraint(ast::Var::Principal, tolerant_setting)? {
-            PrincipalOrResource::Principal(p) => Ok(p),
+            PrincipalOrResource::Principal(p) => Ok(p.with_maybe_source_loc(self.loc.clone())),
             PrincipalOrResource::Resource(_) => Err(self
                 .to_ast_err(ToASTErrorKind::IncorrectVariable {
                     expected: ast::Var::Principal,
@@ -864,7 +864,7 @@ impl Node<Option<cst::VariableDef>> {
                     got: ast::Var::Principal,
                 })
                 .into()),
-            PrincipalOrResource::Resource(r) => Ok(r),
+            PrincipalOrResource::Resource(r) => Ok(r.with_maybe_source_loc(self.loc.clone())),
         }
     }
 

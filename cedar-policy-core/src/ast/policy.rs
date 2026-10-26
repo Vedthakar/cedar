@@ -1282,15 +1282,36 @@ impl std::fmt::Display for TemplateBody {
 }
 
 /// Template constraint on principal scope variables
-#[derive(Clone, Hash, Eq, PartialEq, PartialOrd, Ord, Debug)]
+#[derive(Educe, Clone, Debug, Eq)]
+#[educe(Hash, PartialEq, PartialOrd, Ord)]
 pub struct PrincipalConstraint {
     pub(crate) constraint: PrincipalOrResourceConstraint,
+    /// Source location of the scope clause, if known
+    #[educe(PartialEq(ignore))]
+    #[educe(PartialOrd(ignore))]
+    #[educe(Ord(ignore))]
+    #[educe(Hash(ignore))]
+    pub(crate) loc: Option<Loc>,
 }
 
 impl PrincipalConstraint {
+    /// Set the source location of the scope clause
+    pub fn with_maybe_source_loc(mut self, loc: Option<Loc>) -> Self {
+        self.loc = loc;
+        self
+    }
+
+    /// Source location of the scope clause, if known
+    pub fn source_loc(&self) -> Option<&Loc> {
+        self.loc.as_ref()
+    }
+
     /// Construct a principal constraint
     pub fn new(constraint: PrincipalOrResourceConstraint) -> Self {
-        PrincipalConstraint { constraint }
+        PrincipalConstraint {
+            constraint,
+            loc: None,
+        }
     }
 
     /// Get constraint as ref
@@ -1312,6 +1333,7 @@ impl PrincipalConstraint {
     pub fn any() -> Self {
         PrincipalConstraint {
             constraint: PrincipalOrResourceConstraint::any(),
+            loc: None,
         }
     }
 
@@ -1319,6 +1341,7 @@ impl PrincipalConstraint {
     pub fn is_eq(euid: Arc<EntityUID>) -> Self {
         PrincipalConstraint {
             constraint: PrincipalOrResourceConstraint::is_eq(euid),
+            loc: None,
         }
     }
 
@@ -1326,6 +1349,7 @@ impl PrincipalConstraint {
     pub fn is_eq_slot() -> Self {
         Self {
             constraint: PrincipalOrResourceConstraint::is_eq_slot(),
+            loc: None,
         }
     }
 
@@ -1333,6 +1357,7 @@ impl PrincipalConstraint {
     pub fn is_in(euid: Arc<EntityUID>) -> Self {
         PrincipalConstraint {
             constraint: PrincipalOrResourceConstraint::is_in(euid),
+            loc: None,
         }
     }
 
@@ -1340,6 +1365,7 @@ impl PrincipalConstraint {
     pub fn is_in_slot() -> Self {
         Self {
             constraint: PrincipalOrResourceConstraint::is_in_slot(),
+            loc: None,
         }
     }
 
@@ -1347,6 +1373,7 @@ impl PrincipalConstraint {
     pub fn is_entity_type_in_slot(entity_type: Arc<EntityType>) -> Self {
         Self {
             constraint: PrincipalOrResourceConstraint::is_entity_type_in_slot(entity_type),
+            loc: None,
         }
     }
 
@@ -1354,6 +1381,7 @@ impl PrincipalConstraint {
     pub fn is_entity_type_in(entity_type: Arc<EntityType>, in_entity: Arc<EntityUID>) -> Self {
         Self {
             constraint: PrincipalOrResourceConstraint::is_entity_type_in(entity_type, in_entity),
+            loc: None,
         }
     }
 
@@ -1361,6 +1389,7 @@ impl PrincipalConstraint {
     pub fn is_entity_type(entity_type: Arc<EntityType>) -> Self {
         Self {
             constraint: PrincipalOrResourceConstraint::is_entity_type(entity_type),
+            loc: None,
         }
     }
 
@@ -1369,15 +1398,18 @@ impl PrincipalConstraint {
         match self.constraint {
             PrincipalOrResourceConstraint::Eq(EntityReference::Slot(_)) => Self {
                 constraint: PrincipalOrResourceConstraint::Eq(EntityReference::EUID(euid)),
+                loc: self.loc,
             },
             PrincipalOrResourceConstraint::In(EntityReference::Slot(_)) => Self {
                 constraint: PrincipalOrResourceConstraint::In(EntityReference::EUID(euid)),
+                loc: self.loc,
             },
             PrincipalOrResourceConstraint::IsIn(entity_type, EntityReference::Slot(_)) => Self {
                 constraint: PrincipalOrResourceConstraint::IsIn(
                     entity_type,
                     EntityReference::EUID(euid),
                 ),
+                loc: self.loc,
             },
             // enumerated so it is clearer what other variants there are
             PrincipalOrResourceConstraint::Is(_)
@@ -1400,15 +1432,36 @@ impl std::fmt::Display for PrincipalConstraint {
 }
 
 /// Template constraint on resource scope variables
-#[derive(Clone, Hash, Eq, PartialEq, PartialOrd, Ord, Debug)]
+#[derive(Educe, Clone, Debug, Eq)]
+#[educe(Hash, PartialEq, PartialOrd, Ord)]
 pub struct ResourceConstraint {
     pub(crate) constraint: PrincipalOrResourceConstraint,
+    /// Source location of the scope clause, if known
+    #[educe(PartialEq(ignore))]
+    #[educe(PartialOrd(ignore))]
+    #[educe(Ord(ignore))]
+    #[educe(Hash(ignore))]
+    pub(crate) loc: Option<Loc>,
 }
 
 impl ResourceConstraint {
+    /// Set the source location of the scope clause
+    pub fn with_maybe_source_loc(mut self, loc: Option<Loc>) -> Self {
+        self.loc = loc;
+        self
+    }
+
+    /// Source location of the scope clause, if known
+    pub fn source_loc(&self) -> Option<&Loc> {
+        self.loc.as_ref()
+    }
+
     /// Construct from constraint
     pub fn new(constraint: PrincipalOrResourceConstraint) -> Self {
-        ResourceConstraint { constraint }
+        ResourceConstraint {
+            constraint,
+            loc: None,
+        }
     }
 
     /// Get constraint as ref
@@ -1430,6 +1483,7 @@ impl ResourceConstraint {
     pub fn any() -> Self {
         ResourceConstraint {
             constraint: PrincipalOrResourceConstraint::any(),
+            loc: None,
         }
     }
 
@@ -1437,6 +1491,7 @@ impl ResourceConstraint {
     pub fn is_eq(euid: Arc<EntityUID>) -> Self {
         ResourceConstraint {
             constraint: PrincipalOrResourceConstraint::is_eq(euid),
+            loc: None,
         }
     }
 
@@ -1444,6 +1499,7 @@ impl ResourceConstraint {
     pub fn is_eq_slot() -> Self {
         Self {
             constraint: PrincipalOrResourceConstraint::is_eq_slot(),
+            loc: None,
         }
     }
 
@@ -1451,6 +1507,7 @@ impl ResourceConstraint {
     pub fn is_in_slot() -> Self {
         Self {
             constraint: PrincipalOrResourceConstraint::is_in_slot(),
+            loc: None,
         }
     }
 
@@ -1458,6 +1515,7 @@ impl ResourceConstraint {
     pub fn is_in(euid: Arc<EntityUID>) -> Self {
         ResourceConstraint {
             constraint: PrincipalOrResourceConstraint::is_in(euid),
+            loc: None,
         }
     }
 
@@ -1465,6 +1523,7 @@ impl ResourceConstraint {
     pub fn is_entity_type_in_slot(entity_type: Arc<EntityType>) -> Self {
         Self {
             constraint: PrincipalOrResourceConstraint::is_entity_type_in_slot(entity_type),
+            loc: None,
         }
     }
 
@@ -1472,6 +1531,7 @@ impl ResourceConstraint {
     pub fn is_entity_type_in(entity_type: Arc<EntityType>, in_entity: Arc<EntityUID>) -> Self {
         Self {
             constraint: PrincipalOrResourceConstraint::is_entity_type_in(entity_type, in_entity),
+            loc: None,
         }
     }
 
@@ -1479,6 +1539,7 @@ impl ResourceConstraint {
     pub fn is_entity_type(entity_type: Arc<EntityType>) -> Self {
         Self {
             constraint: PrincipalOrResourceConstraint::is_entity_type(entity_type),
+            loc: None,
         }
     }
 
@@ -1487,15 +1548,18 @@ impl ResourceConstraint {
         match self.constraint {
             PrincipalOrResourceConstraint::Eq(EntityReference::Slot(_)) => Self {
                 constraint: PrincipalOrResourceConstraint::Eq(EntityReference::EUID(euid)),
+                loc: self.loc,
             },
             PrincipalOrResourceConstraint::In(EntityReference::Slot(_)) => Self {
                 constraint: PrincipalOrResourceConstraint::In(EntityReference::EUID(euid)),
+                loc: self.loc,
             },
             PrincipalOrResourceConstraint::IsIn(entity_type, EntityReference::Slot(_)) => Self {
                 constraint: PrincipalOrResourceConstraint::IsIn(
                     entity_type,
                     EntityReference::EUID(euid),
                 ),
+                loc: self.loc,
             },
             // enumerated so it is clearer what other variants there are
             PrincipalOrResourceConstraint::Is(_)
@@ -2005,11 +2069,11 @@ pub(crate) mod test_generators {
     }
 
     pub fn all_principal_constraints() -> impl Iterator<Item = PrincipalConstraint> {
-        all_por_constraints().map(|constraint| PrincipalConstraint { constraint })
+        all_por_constraints().map(|constraint| PrincipalConstraint::new(constraint))
     }
 
     pub fn all_resource_constraints() -> impl Iterator<Item = ResourceConstraint> {
-        all_por_constraints().map(|constraint| ResourceConstraint { constraint })
+        all_por_constraints().map(|constraint| ResourceConstraint::new(constraint))
     }
 
     pub fn all_actions_constraints() -> impl Iterator<Item = ActionConstraint> {
