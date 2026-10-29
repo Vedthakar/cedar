@@ -14,6 +14,11 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
+### Changed
+
+- Partial evaluation (experimental `partial-eval` feature) now returns an error for an `if` with an
+  unknown guard when both of its branches evaluate to an error, instead of a residual (#880).
+
 ### Fixed
 
 - Fixed `Entities::upsert_entities` keeping a stale ancestor when the same entity is given more than
