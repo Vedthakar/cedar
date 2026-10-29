@@ -8140,6 +8140,104 @@ mod request_validation_tests {
             .build(),
         );
     }
+
+    /// `RequestBuilder` builds concrete requests without the `partial-eval`
+    /// feature, and validates them like `Request::new` (#565)
+    mod request_builder {
+        use super::*;
+
+        fn context() -> Context {
+            Context::from_json_value(json!({"foo": "bar"}), None).unwrap()
+        }
+
+        fn builder() -> RequestBuilder<UnsetSchema> {
+            RequestBuilder::default()
+                .principal(EntityUid::from_strs("Principal", "principal"))
+                .action(EntityUid::from_strs("Action", "action"))
+                .resource(EntityUid::from_strs("Resource", "resource"))
+                .context(context())
+        }
+
+        fn expected() -> Request {
+            Request::new(
+                EntityUid::from_strs("Principal", "principal"),
+                EntityUid::from_strs("Action", "action"),
+                EntityUid::from_strs("Resource", "resource"),
+                context(),
+                None,
+            )
+            .unwrap()
+        }
+
+        #[test]
+        fn without_schema() {
+            let request = builder().build();
+            assert_eq!(request, expected());
+            assert_eq!(
+                request.principal(),
+                Some(&EntityUid::from_strs("Principal", "principal"))
+            );
+            assert_eq!(request.context(), Some(&context()));
+            assert_eq!(
+                Request::builder()
+                    .principal(EntityUid::from_strs("Principal", "principal"))
+                    .action(EntityUid::from_strs("Action", "action"))
+                    .resource(EntityUid::from_strs("Resource", "resource"))
+                    .context(context())
+                    .build(),
+                expected()
+            );
+        }
+
+        #[test]
+        fn with_schema() {
+            let schema = schema();
+            let request = builder().schema(&schema).build().unwrap();
+            assert_eq!(request, expected());
+        }
+
+        #[test]
+        fn with_schema_invalid() {
+            let schema = schema();
+            let builder = RequestBuilder::default()
+                .principal(EntityUid::from_strs("Principal", "principal"))
+                .action(EntityUid::from_strs("Action", "action"))
+                .resource(EntityUid::from_strs("Resource", "resource"))
+                .context(Context::empty());
+            let err = builder.clone().schema(&schema).build().unwrap_err();
+            let new_err = Request::new(
+                EntityUid::from_strs("Principal", "principal"),
+                EntityUid::from_strs("Action", "action"),
+                EntityUid::from_strs("Resource", "resource"),
+                Context::empty(),
+                Some(&schema),
+            )
+            .unwrap_err();
+            assert_eq!(err.to_string(), new_err.to_string());
+            expect_err(
+                "",
+                &Report::new(err),
+                &ExpectedErrorMessageBuilder::error(
+                    r#"context `{}` is not valid for `Action::"action"`"#,
+                )
+                .build(),
+            );
+
+            let err = builder
+                .action(EntityUid::from_strs("Action", "undeclared"))
+                .schema(&schema)
+                .build()
+                .unwrap_err();
+            expect_err(
+                "",
+                &Report::new(err),
+                &ExpectedErrorMessageBuilder::error(
+                    r#"request's action `Action::"undeclared"` is not declared in the schema"#,
+                )
+                .build(),
+            );
+        }
+    }
 }
 
 mod context_tests {
