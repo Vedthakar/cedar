@@ -14,8 +14,15 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
+### Changed
+
+- (experimental, `protobufs` feature) The conversion from `Entities` to `proto::models::Entities` is now `TryFrom`
+  instead of `From`, since partial entities have no protobuf form (#1348).
+
 ### Fixed
 
+- (experimental, `protobufs` feature) `Entities::encode` returns `EncodeError::Conversion` for partial entities
+  instead of panicking (#1348).
 - Fixed `Entities::upsert_entities` keeping a stale ancestor when the same entity is given more than
   once in one batch.
 - The policy formatter no longer puts a line break between a method name and its argument list when it splits
