@@ -54,15 +54,19 @@ pub(crate) fn entities_model_to_api(
     .map_err(|e| ProtobufConversionError::InvalidValue(format!("invalid entities: {e}")))
 }
 
-impl From<&entities::Entities> for models::Entities {
-    fn from(v: &entities::Entities) -> Self {
-        assert!(
-            !v.is_partial(),
-            "protobuf does not support encoding partial Entities"
-        );
-        Self {
-            entities: v.iter().map(models::Entity::from).collect(),
+impl TryFrom<&entities::Entities> for models::Entities {
+    type Error = ProtobufConversionError;
+    /// Fails for partial [`entities::Entities`], which the protobuf format
+    /// cannot represent.
+    fn try_from(v: &entities::Entities) -> Result<Self, Self::Error> {
+        if v.is_partial() {
+            return Err(ProtobufConversionError::InvalidValue(
+                "protobuf does not support encoding partial entities".into(),
+            ));
         }
+        Ok(Self {
+            entities: v.iter().map(models::Entity::from).collect(),
+        })
     }
 }
 
@@ -81,7 +85,7 @@ mod test {
         let entities1 = entities::Entities::new();
         assert_deep_eq!(
             entities1,
-            entities::Entities::try_from(models::Entities::from(&entities1)).unwrap()
+            entities::Entities::try_from(models::Entities::try_from(&entities1).unwrap()).unwrap()
         );
 
         // Single Element Test
@@ -110,7 +114,7 @@ mod test {
             .unwrap();
         assert_deep_eq!(
             entities2,
-            entities::Entities::try_from(models::Entities::from(&entities2)).unwrap()
+            entities::Entities::try_from(models::Entities::try_from(&entities2).unwrap()).unwrap()
         );
 
         // Two Element Test
@@ -136,7 +140,7 @@ mod test {
             .unwrap();
         assert_deep_eq!(
             entities3,
-            entities::Entities::try_from(models::Entities::from(&entities3)).unwrap()
+            entities::Entities::try_from(models::Entities::try_from(&entities3).unwrap()).unwrap()
         );
     }
 }

@@ -46,7 +46,6 @@ macro_rules! fallible_conversions {
 
 fallible_conversions!(api::Entity, api::Entity, models::Entity);
 fallible_conversions!(api::EntityUid, api::EntityUid, models::EntityUid);
-fallible_conversions!(api::Entities, api::Entities, models::Entities);
 fallible_conversions!(api::Schema, api::Schema, models::Schema);
 fallible_conversions!(api::EntityTypeName, api::EntityTypeName, models::Name);
 fallible_conversions!(api::EntityNamespace, api::EntityNamespace, models::Name);
@@ -54,6 +53,21 @@ fallible_conversions!(api::Expression, api::Expression, models::Expr);
 fallible_conversions!(api::Request, api::Request, models::Request);
 
 // nonstandard conversions
+
+// Both directions are fallible: partial entities have no protobuf form.
+impl TryFrom<&api::Entities> for models::Entities {
+    type Error = ProtobufConversionError;
+    fn try_from(v: &api::Entities) -> Result<Self, Self::Error> {
+        Self::try_from(&v.0)
+    }
+}
+
+impl TryFrom<models::Entities> for api::Entities {
+    type Error = ProtobufConversionError;
+    fn try_from(v: models::Entities) -> Result<Self, Self::Error> {
+        Ok(Self(v.try_into()?))
+    }
+}
 
 impl From<&api::Template> for models::TemplateBody {
     fn from(v: &api::Template) -> Self {
@@ -117,7 +131,7 @@ standard_protobuf_impl!(api::Request, models::Request);
 
 impl traits::Protobuf for api::Entities {
     fn encode(&self) -> Result<Vec<u8>, traits::EncodeError> {
-        traits::encode_to_vec::<models::Entities, _>(self)
+        traits::try_encode_to_vec::<models::Entities, _>(self)
     }
     fn decode(buf: impl prost::bytes::Buf) -> Result<Self, traits::DecodeError> {
         // Uses the standard TryFrom path which computes TC via ComputeNow
@@ -366,6 +380,29 @@ mod decode_test {
         let checked = T::decode(&buf[..]).expect("decode failed");
         let unchecked = T::decode_unchecked(&buf[..]).expect("decode_unchecked failed");
         similar_asserts::assert_eq!(checked, unchecked);
+    }
+
+    /// Encoding partial entities returns an error instead of panicking (#1348).
+    #[cfg(feature = "partial-eval")]
+    #[test]
+    fn encode_partial_entities_is_an_error() {
+        let partial = crate::Entities::empty().partial();
+        assert_matches!(
+            partial.encode(),
+            Err(crate::proto::traits::EncodeError::Conversion(e)) => {
+                assert_eq!(e.to_string(), "protobuf does not support encoding partial entities");
+            }
+        );
+        assert_matches!(crate::proto::models::Entities::try_from(&partial), Err(_));
+
+        // Complete entities still encode, and round-trip
+        let entities = crate::Entities::from_json_str(
+            r#"[{"uid": {"type": "User", "id": "alice"}, "attrs": {}, "parents": []}]"#,
+            None,
+        )
+        .unwrap();
+        let decoded = crate::Entities::decode(&entities.encode().unwrap()[..]).unwrap();
+        assert_eq!(decoded, entities);
     }
 
     /// Decoding arbitrary bytes must never panic — it should return `Err`.

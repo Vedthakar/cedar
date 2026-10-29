@@ -59,7 +59,7 @@ pub enum EncodeError {
     #[error(transparent)]
     Proto(#[from] prost::EncodeError),
     /// The value has no protobuf representation, as a schema that still
-    /// declares some names `external` (RFC 116) does not.
+    /// declares some names `external` (RFC 116) or partial entities do not.
     #[error(transparent)]
     Conversion(#[from] ProtobufConversionError),
 }
@@ -200,6 +200,22 @@ pub(crate) fn encode_to_vec<M: prost::Message + EncodeCheck + for<'a> From<&'a T
     thing: &T,
 ) -> Result<Vec<u8>, EncodeError> {
     let model = M::from(thing);
+    model.check_for_encode()?;
+    Ok(model.encode_to_vec())
+}
+
+/// Like [`encode_to_vec`], for things whose conversion to the protobuf format
+/// `M` can fail
+///
+/// # Errors
+///
+/// Returns [`EncodeError::Conversion`] if `thing` has no protobuf
+/// representation, and otherwise as [`encode_to_vec`].
+pub(crate) fn try_encode_to_vec<M, T>(thing: &T) -> Result<Vec<u8>, EncodeError>
+where
+    M: prost::Message + EncodeCheck + for<'a> TryFrom<&'a T, Error = ProtobufConversionError>,
+{
+    let model = M::try_from(thing)?;
     model.check_for_encode()?;
     Ok(model.encode_to_vec())
 }
