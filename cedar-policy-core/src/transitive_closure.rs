@@ -657,6 +657,20 @@ mod tests {
     }
 
     #[test]
+    fn compute_tc_long_cycle() {
+        // The same chain, closed into a cycle by `E{len - 1} -> E0`
+        let result = with_small_stack(|| {
+            let mut entities = chain(LONG_CHAIN);
+            entities
+                .get_mut(&EntityUID::with_eid(&format!("E{}", LONG_CHAIN - 1)))
+                .unwrap()
+                .add_parent(EntityUID::with_eid("E0"));
+            compute_tc(&mut entities, true)
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn repair_tc_long_chain() {
         let entities = with_small_stack(|| {
             let mut entities = chain(LONG_CHAIN);
