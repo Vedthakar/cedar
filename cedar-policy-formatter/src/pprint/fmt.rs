@@ -23,6 +23,7 @@ use cedar_policy_core::parser::parse_policyset;
 use cedar_policy_core::parser::text_to_cst::parse_policies;
 use smol_str::ToSmolStr;
 
+use super::formatter_off::{separator_after, verbatim_policies};
 use super::lexer::get_token_stream;
 use super::utils::remove_empty_lines;
 
@@ -113,14 +114,40 @@ pub fn policies_str_to_pretty(ps: &str, config: &Config) -> Result<String> {
     let (tokens, end_of_file_comment) =
         get_token_stream(ps).ok_or_else(|| miette!("cannot get token stream"))?;
     let mut context = config::Context { config, tokens };
-    let mut formatted_policies = cst
+    let policies = &cst
         .as_inner()
         .ok_or_else(|| miette!("fail to get input policy CST"))?
-        .0
+        .0;
+    let spans: Vec<_> = policies
         .iter()
-        .map(|p| Ok(remove_empty_lines(&tree_to_pretty(p, &mut context)?)))
-        .collect::<Result<Vec<String>>>()?
-        .join("\n\n");
+        .map(|p| p.loc.as_ref().map(|loc| (loc.start(), loc.end())))
+        .collect();
+    let verbatim = verbatim_policies(ps, &spans);
+    let mut formatted_policies = String::new();
+    // Where the previous policy's verbatim text ended, if it was output verbatim
+    let mut previous_verbatim_end = None;
+    for (i, (p, verbatim)) in policies.iter().zip(verbatim).enumerate() {
+        // Format the policy even when it is output verbatim, so that the
+        // comments it holds are consumed from the token stream.
+        let formatted = remove_empty_lines(&tree_to_pretty(p, &mut context)?);
+        match (verbatim, previous_verbatim_end) {
+            // Keep the separator between two policies that are both verbatim
+            (Some((text, _)), Some(_)) => formatted_policies.push_str(text),
+            // Keep the input's separator after verbatim text, up to one blank line
+            (None, Some(end)) => {
+                formatted_policies.push_str(separator_after(ps, end));
+                formatted_policies.push_str(&formatted);
+            }
+            (_, None) => {
+                if i > 0 {
+                    formatted_policies.push_str("\n\n");
+                }
+                formatted_policies
+                    .push_str(verbatim.map_or(formatted.as_str(), |(text, _)| text.trim_start()));
+            }
+        }
+        previous_verbatim_end = verbatim.map(|(_, end)| end);
+    }
 
     // add a trailing newline
     formatted_policies.push('\n');
