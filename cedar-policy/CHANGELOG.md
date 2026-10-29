@@ -14,6 +14,12 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
+### Added
+
+- `RequestBuilder` and `Request::builder()` are now available without the experimental `partial-eval` feature,
+  for building concrete requests with an optional schema. Setting a component to "unknown" with
+  `unknown_principal_with_type` / `unknown_resource_with_type` still requires `partial-eval` (#565).
+
 ### Fixed
 
 - Fixed `Entities::upsert_entities` keeping a stale ancestor when the same entity is given more than

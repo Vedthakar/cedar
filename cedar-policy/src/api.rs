@@ -5016,10 +5016,14 @@ impl FromStr for RestrictedExpression {
 
 /// Builder for a [`Request`]
 ///
-/// The default for principal, action, resource, and context fields is Unknown
-/// for partial evaluation.
-#[doc = include_str!("../experimental_warning.md")]
-#[cfg(feature = "partial-eval")]
+/// For a concrete request, set the principal, action, resource and context,
+/// and optionally a [`Schema`] to validate the request against. With a schema,
+/// [`RequestBuilder::build`] validates the request the same way as
+/// [`Request::new`].
+///
+/// A principal, action, resource or context that is not set is "unknown",
+/// which only partial evaluation (the experimental `partial-eval` feature)
+/// can make use of.
 #[derive(Debug, Clone)]
 pub struct RequestBuilder<S> {
     principal: ast::EntityUIDEntry,
@@ -5031,12 +5035,9 @@ pub struct RequestBuilder<S> {
 }
 
 /// A marker type that indicates [`Schema`] is not set for a request
-#[doc = include_str!("../experimental_warning.md")]
-#[cfg(feature = "partial-eval")]
 #[derive(Debug, Clone, Copy)]
 pub struct UnsetSchema;
 
-#[cfg(feature = "partial-eval")]
 impl Default for RequestBuilder<UnsetSchema> {
     fn default() -> Self {
         Self {
@@ -5049,7 +5050,6 @@ impl Default for RequestBuilder<UnsetSchema> {
     }
 }
 
-#[cfg(feature = "partial-eval")]
 impl<S> RequestBuilder<S> {
     /// Set the principal.
     ///
@@ -5066,6 +5066,8 @@ impl<S> RequestBuilder<S> {
     /// Set the principal to be unknown, but known to belong to a certain entity type.
     ///
     /// This information is taken into account when evaluating 'is', '==' and '!=' expressions.
+    #[doc = include_str!("../experimental_warning.md")]
+    #[cfg(feature = "partial-eval")]
     #[must_use]
     pub fn unknown_principal_with_type(self, principal_type: EntityTypeName) -> Self {
         Self {
@@ -5101,6 +5103,8 @@ impl<S> RequestBuilder<S> {
     /// Set the resource to be unknown, but known to belong to a certain entity type.
     ///
     /// This information is taken into account when evaluating 'is', '==' and '!=' expressions.
+    #[doc = include_str!("../experimental_warning.md")]
+    #[cfg(feature = "partial-eval")]
     #[must_use]
     pub fn unknown_resource_with_type(self, resource_type: EntityTypeName) -> Self {
         Self {
@@ -5119,7 +5123,6 @@ impl<S> RequestBuilder<S> {
     }
 }
 
-#[cfg(feature = "partial-eval")]
 impl RequestBuilder<UnsetSchema> {
     /// Set the schema. If present, this will be used for request validation.
     #[must_use]
@@ -5144,7 +5147,6 @@ impl RequestBuilder<UnsetSchema> {
     }
 }
 
-#[cfg(feature = "partial-eval")]
 impl RequestBuilder<&Schema> {
     /// Create the [`Request`]
     pub fn build(self) -> Result<Request, RequestValidationError> {
@@ -5196,8 +5198,6 @@ impl PartialEq for Request {
 
 impl Request {
     /// Create a [`RequestBuilder`]
-    #[doc = include_str!("../experimental_warning.md")]
-    #[cfg(feature = "partial-eval")]
     pub fn builder() -> RequestBuilder<UnsetSchema> {
         RequestBuilder::default()
     }
