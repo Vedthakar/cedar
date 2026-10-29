@@ -857,7 +857,7 @@ impl<'e> Evaluator<'e> {
                 // Try to partial interpret both branches in best-effort:
                 // if a branch partial evaluation fails, then fallback to the original branch expression.
                 // If both branches fail, then the conditional errors whatever the guard
-                // evaluates to (a non-boolean guard is an error too), so return an error.
+                // evaluates to (a non-boolean guard is an error too), so return the consequent's error.
                 match (
                     self.partial_interpret(consequent, slots),
                     self.partial_interpret(alternative, slots),
@@ -5600,7 +5600,10 @@ pub(crate) mod test {
         let eval = Evaluator::new(empty_request(), &es, Extensions::none());
 
         // Both branches error, so the conditional errors whatever the guard is
-        assert_matches!(eval.partial_interpret(&e, &HashMap::new()), Err(_));
+        assert_matches!(
+            eval.partial_interpret(&e, &HashMap::new()),
+            Err(EvaluationError::TypeError(_))
+        );
     }
 
     #[test]
@@ -5876,7 +5879,10 @@ pub(crate) mod test {
         let es = Entities::new();
         let eval = Evaluator::new(empty_request(), &es, Extensions::none());
 
-        assert_matches!(eval.partial_interpret(&e, &HashMap::new()), Err(_));
+        assert_matches!(
+            eval.partial_interpret(&e, &HashMap::new()),
+            Err(EvaluationError::TypeError(_))
+        );
     }
 
     // if $unknown then (if $unknown2 then 1+true else 1+"a") else 1+false -> err
@@ -5895,7 +5901,10 @@ pub(crate) mod test {
         let es = Entities::new();
         let eval = Evaluator::new(empty_request(), &es, Extensions::none());
 
-        assert_matches!(eval.partial_interpret(&e, &HashMap::new()), Err(_));
+        assert_matches!(
+            eval.partial_interpret(&e, &HashMap::new()),
+            Err(EvaluationError::TypeError(_))
+        );
     }
 
     // err && res -> err
