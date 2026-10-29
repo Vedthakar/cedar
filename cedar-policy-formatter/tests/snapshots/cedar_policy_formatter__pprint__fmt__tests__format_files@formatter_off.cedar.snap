@@ -12,7 +12,6 @@ permit(principal  ==  User::"alice",
        resource)   // kept as written
   when { resource.owner   ==   principal };
 forbid(principal,action,resource);
-
 // @formatter:on
 permit (principal, action, resource)
 when { "// @formatter:off" == "x" };

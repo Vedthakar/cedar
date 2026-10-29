@@ -72,11 +72,12 @@ fn region_end(src: &str, end: usize) -> usize {
 /// For each policy, given as its byte span in `src` (or `None` if unknown),
 /// the input text to output in place of the formatted policy, or `None` if it
 /// should be formatted. The text starts right after the previous policy's text,
-/// so it begins with the whitespace that separated them.
+/// so it begins with the whitespace that separated them. The offset where the
+/// text ends is returned with it.
 pub(crate) fn verbatim_policies<'a>(
     src: &'a str,
     spans: &[Option<(usize, usize)>],
-) -> Vec<Option<&'a str>> {
+) -> Vec<Option<(&'a str, usize)>> {
     let directives = directives(src);
     if !directives.iter().any(|(_, off)| *off) {
         return vec![None; spans.len()];
@@ -95,11 +96,30 @@ pub(crate) fn verbatim_policies<'a>(
             region_start = region_end(src, end);
             if off {
                 src.get(start_of_region..region_start)
+                    .map(|text| (text, region_start))
             } else {
                 None
             }
         })
         .collect()
+}
+
+/// The separator to output between verbatim text ending at `end` and the next
+/// formatted policy: the line breaks in the input there, capped at one blank
+/// line, and at least one line break.
+pub(crate) fn separator_after(src: &str, end: usize) -> &'static str {
+    let line_breaks = src
+        .get(end..)
+        .unwrap_or_default()
+        .chars()
+        .take_while(|c| c.is_whitespace())
+        .filter(|c| *c == '\n')
+        .count();
+    if line_breaks >= 2 {
+        "\n\n"
+    } else {
+        "\n"
+    }
 }
 
 #[cfg(test)]
@@ -128,7 +148,7 @@ mod tests {
         assert_eq!(
             policies_str_to_pretty(&src, &config).unwrap(),
             format!(
-                "permit (principal, action, resource);\n\n{kept}\n\n// @formatter:on\npermit (principal, action, resource)\nwhen {{ true }};\n"
+                "permit (principal, action, resource);\n\n{kept}\n// @formatter:on\npermit (principal, action, resource)\nwhen {{ true }};\n"
             )
         );
 
@@ -145,5 +165,51 @@ mod tests {
             policies_str_to_pretty(src, &config).unwrap(),
             "permit (principal, action, resource)\nwhen { \"// @formatter:off\" == \"x\" };\n"
         );
+    }
+
+    #[test]
+    fn test_formatter_on_separator() {
+        // The separator after verbatim text is kept, up to one blank line
+        let config = Config {
+            line_width: 80,
+            indent_width: 2,
+        };
+        let src = "// @formatter:off\nforbid(principal,action,resource);\n\n\n\n// @formatter:on\npermit(principal,action,resource);\n";
+        assert_eq!(
+            policies_str_to_pretty(src, &config).unwrap(),
+            "// @formatter:off\nforbid(principal,action,resource);\n\n// @formatter:on\npermit (principal, action, resource);\n"
+        );
+    }
+
+    #[test]
+    fn test_formatter_off_inside_policy() {
+        // A directive inside a policy body takes effect from the next policy
+        let config = Config {
+            line_width: 80,
+            indent_width: 2,
+        };
+        let src = "permit(principal,action,resource)\n// @formatter:off\nwhen{true};\nforbid ( principal , action , resource ) ;\n";
+        assert_eq!(
+            policies_str_to_pretty(src, &config).unwrap(),
+            "permit (principal, action, resource)\n// @formatter:off\nwhen { true };\n\nforbid ( principal , action , resource ) ;\n"
+        );
+    }
+
+    #[test]
+    fn test_formatter_off_idempotent() {
+        // Formatting the output again does not change it
+        let config = Config {
+            line_width: 80,
+            indent_width: 2,
+        };
+        for src in [
+            include_str!("../../tests/formatter_off.cedar"),
+            "permit(principal,action,resource);\n\n// @formatter:off\npermit(principal  ==  User::\"alice\",\n       action,\n       resource)   // kept\n  when { resource.owner   ==   principal };\nforbid(principal,action,resource);\n// @formatter:on\npermit(principal,action,resource)when{true};\n",
+            "// @formatter:off\nforbid(principal,action,resource);\n\n\n\n// @formatter:on\npermit(principal,action,resource);\n",
+            "permit(principal,action,resource)\n// @formatter:off\nwhen{true};\nforbid ( principal , action , resource ) ;\n",
+        ] {
+            let once = policies_str_to_pretty(src, &config).unwrap();
+            assert_eq!(policies_str_to_pretty(&once, &config).unwrap(), once);
+        }
     }
 }
