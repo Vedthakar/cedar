@@ -19,6 +19,7 @@ pub use fmt::*;
 mod config;
 pub use config::*;
 mod doc;
+mod formatter_off;
 pub mod lexer;
 pub mod token;
 mod utils;
