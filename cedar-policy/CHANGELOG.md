@@ -16,6 +16,8 @@ Cedar Language Version: TBD
 
 ### Fixed
 
+- Loading entities with a very long chain of parents no longer overflows the stack while computing the
+  transitive closure (#2660).
 - Fixed `Entities::upsert_entities` keeping a stale ancestor when the same entity is given more than
   once in one batch.
 - The policy formatter no longer puts a line break between a method name and its argument list when it splits
