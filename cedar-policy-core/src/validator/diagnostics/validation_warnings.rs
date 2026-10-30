@@ -27,7 +27,10 @@ macro_rules! impl_diagnostic_warning {
     };
 }
 
-use crate::{ast::PolicyID, parser::Loc};
+use crate::{
+    ast::{EntityUID, PolicyID},
+    parser::Loc,
+};
 use miette::Diagnostic;
 use thiserror::Error;
 
@@ -168,5 +171,30 @@ impl Diagnostic for InvalidActionApplication {
             )),
             (false, false) => None,
         }
+    }
+}
+
+/// Warning for policies whose `action in [...]` scope constraint lists an
+/// action that cannot be applied to any principal and resource satisfying the
+/// policy scope, while other listed actions can
+#[derive(Debug, Clone, Error, Hash, Eq, PartialEq)]
+#[error("for policy `{policy_id}`, action `{action}` cannot be applied to any principal and resource satisfying the policy scope constraints")]
+pub struct InapplicableAction {
+    /// Source location
+    pub source_loc: Option<Loc>,
+    /// Policy ID where the warning occurred
+    pub policy_id: PolicyID,
+    /// The action in the action scope constraint that cannot apply
+    pub action: EntityUID,
+}
+
+impl Diagnostic for InapplicableAction {
+    impl_diagnostic_from_source_loc_opt_field!(source_loc);
+    impl_diagnostic_warning!();
+
+    fn help<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
+        Some(Box::new(
+            "remove the action from the action scope, or check the `appliesTo` of the action in the schema",
+        ))
     }
 }

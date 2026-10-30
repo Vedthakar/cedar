@@ -25,7 +25,7 @@ use validation_errors::UnrecognizedActionIdHelp;
 
 use std::collections::BTreeSet;
 
-use crate::ast::{EntityType, Expr, PolicyID};
+use crate::ast::{EntityType, EntityUID, Expr, PolicyID};
 
 use crate::validator::types::{EntityLUB, Type};
 
@@ -556,6 +556,12 @@ pub enum ValidationWarning {
     #[diagnostic(transparent)]
     #[error(transparent)]
     InvalidActionApplication(#[from] validation_warnings::InvalidActionApplication),
+    /// An action listed in an `action in [...]` scope constraint cannot be
+    /// applied to any principal and resource that satisfy their respective
+    /// scope conditions, although other listed actions can.
+    #[diagnostic(transparent)]
+    #[error(transparent)]
+    InapplicableAction(#[from] validation_warnings::InapplicableAction),
 }
 
 impl ValidationWarning {
@@ -645,6 +651,18 @@ impl ValidationWarning {
             policy_id,
             would_in_fix_principal,
             would_in_fix_resource,
+        }
+        .into()
+    }
+    pub(crate) fn inapplicable_action(
+        source_loc: Option<Loc>,
+        policy_id: PolicyID,
+        action: EntityUID,
+    ) -> Self {
+        validation_warnings::InapplicableAction {
+            source_loc,
+            policy_id,
+            action,
         }
         .into()
     }

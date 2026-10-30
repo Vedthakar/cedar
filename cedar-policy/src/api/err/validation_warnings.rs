@@ -63,3 +63,11 @@ wrap_core_warning!(MixedScriptIdentifier);
 wrap_core_warning!(ConfusableIdentifier);
 wrap_core_warning!(ImpossiblePolicy);
 wrap_core_warning!(InvalidActionApplication);
+wrap_core_warning!(InapplicableAction);
+
+impl InapplicableAction {
+    /// The action in the `action in [...]` scope constraint that cannot apply
+    pub fn action(&self) -> &crate::EntityUid {
+        crate::EntityUid::ref_cast(&self.0.action)
+    }
+}

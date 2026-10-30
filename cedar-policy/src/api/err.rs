@@ -627,6 +627,12 @@ pub enum ValidationWarning {
     #[diagnostic(transparent)]
     #[error(transparent)]
     InvalidActionApplication(#[from] validation_warnings::InvalidActionApplication),
+    /// An action listed in an `action in [...]` scope constraint cannot be
+    /// applied to any principal and resource that satisfy their respective
+    /// scope conditions, although other listed actions can.
+    #[diagnostic(transparent)]
+    #[error(transparent)]
+    InapplicableAction(#[from] validation_warnings::InapplicableAction),
 }
 
 impl ValidationWarning {
@@ -640,6 +646,7 @@ impl ValidationWarning {
             Self::ConfusableIdentifier(w) => w.policy_id(),
             Self::ImpossiblePolicy(w) => w.policy_id(),
             Self::InvalidActionApplication(w) => w.policy_id(),
+            Self::InapplicableAction(w) => w.policy_id(),
         }
     }
 }
@@ -668,6 +675,9 @@ impl From<cedar_policy_core::validator::ValidationWarning> for ValidationWarning
             }
             cedar_policy_core::validator::ValidationWarning::InvalidActionApplication(w) => {
                 Self::InvalidActionApplication(w.into())
+            }
+            cedar_policy_core::validator::ValidationWarning::InapplicableAction(w) => {
+                Self::InapplicableAction(w.into())
             }
         }
     }
