@@ -5454,12 +5454,13 @@ impl Context {
     /// Create a `Context` from any value implementing [`serde::Serialize`]
     /// (for instance, a Rust struct), which must serialize to a JSON object.
     ///
-    /// This is equivalent to calling [`Context::from_json_value`] on
-    /// `serde_json::to_value(value)`: the value must use the same JSON
-    /// format, including the `__entity` and `__extn` escapes, and `schema` is
-    /// handled the same way. It gives the same `Context` and the same errors.
-    /// If `value` fails to serialize to JSON, the `serde_json` error is
-    /// returned as [`ContextJsonError::JsonDeserialization`].
+    /// The value must serialize to the same JSON format that
+    /// [`Context::from_json_value`] accepts, including the `__entity` and
+    /// `__extn` escapes, and `schema` is handled the same way. This is
+    /// currently implemented by converting `value` with
+    /// `serde_json::to_value` and calling [`Context::from_json_value`].
+    /// If `value` fails to serialize, the error is reported as
+    /// [`ContextJsonError::JsonDeserialization`].
     /// ```
     /// # use cedar_policy::Context;
     /// #[derive(serde::Serialize)]
