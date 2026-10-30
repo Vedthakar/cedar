@@ -8347,6 +8347,262 @@ mod context_tests {
     }
 }
 
+mod context_from_serde_tests {
+    //! `Context::from_serde(&v, ..)` must give the same result as
+    //! `Context::from_json_value(serde_json::to_value(&v)?, ..)`.
+    use std::collections::{BTreeMap, HashMap};
+
+    use cool_asserts::assert_matches;
+    use serde::Serialize;
+    use serde_json::json;
+
+    use super::*;
+
+    fn schema() -> Schema {
+        Schema::from_json_value(json!({
+            "": {
+                "entityTypes": { "User": {} },
+                "actions": {
+                    "action": {
+                        "appliesTo": {
+                            "principalTypes": ["User"],
+                            "resourceTypes": ["User"],
+                            "context": {
+                                "type": "Record",
+                                "attributes": {
+                                    "name": { "type": "String" },
+                                    "owner": { "type": "Entity", "name": "User" },
+                                    "limit": { "type": "Extension", "name": "decimal" },
+                                    "nested": {
+                                        "type": "Record",
+                                        "attributes": {
+                                            "levels": {
+                                                "type": "Set",
+                                                "element": { "type": "Set", "element": { "type": "Long" } }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }))
+        .unwrap()
+    }
+
+    fn action() -> EntityUid {
+        EntityUid::from_str(r#"Action::"action""#).unwrap()
+    }
+
+    /// Returns the `from_serde` result after checking it matches the
+    /// `to_value` + `from_json_value` path (same `Context` or same error).
+    #[track_caller]
+    fn assert_same<T: Serialize>(
+        value: &T,
+        schema: Option<(&Schema, &EntityUid)>,
+    ) -> Result<Context, ContextJsonError> {
+        let via_value = match serde_json::to_value(value) {
+            Ok(json) => Context::from_json_value(json, schema).map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        };
+        let direct = Context::from_serde(value, schema);
+        assert_eq!(
+            direct.as_ref().map_err(ToString::to_string).cloned(),
+            via_value
+        );
+        direct
+    }
+
+    #[derive(Serialize)]
+    struct EntityRef {
+        #[serde(rename = "type")]
+        ty: String,
+        id: String,
+    }
+
+    #[derive(Serialize)]
+    struct EntityEscape {
+        __entity: EntityRef,
+    }
+
+    #[derive(Serialize)]
+    struct ExtnCall {
+        #[serde(rename = "fn")]
+        func: String,
+        arg: String,
+    }
+
+    #[derive(Serialize)]
+    struct ExtnEscape {
+        __extn: ExtnCall,
+    }
+
+    #[derive(Serialize)]
+    struct Nested {
+        levels: Vec<Vec<i64>>,
+    }
+
+    /// Context with explicit `__entity` and `__extn` escapes
+    #[derive(Serialize)]
+    struct Escaped {
+        name: String,
+        owner: EntityEscape,
+        limit: ExtnEscape,
+        nested: Nested,
+    }
+
+    fn escaped() -> Escaped {
+        Escaped {
+            name: "alice".into(),
+            owner: EntityEscape {
+                __entity: EntityRef {
+                    ty: "User".into(),
+                    id: "alice".into(),
+                },
+            },
+            limit: ExtnEscape {
+                __extn: ExtnCall {
+                    func: "decimal".into(),
+                    arg: "1.5".into(),
+                },
+            },
+            nested: Nested {
+                levels: vec![vec![1, 2], vec![], vec![3]],
+            },
+        }
+    }
+
+    /// Context relying on the schema for implicit entity and extension values
+    #[derive(Serialize)]
+    struct Implicit {
+        name: String,
+        owner: EntityRef,
+        limit: String,
+        nested: Nested,
+    }
+
+    fn implicit() -> Implicit {
+        Implicit {
+            name: "alice".into(),
+            owner: EntityRef {
+                ty: "User".into(),
+                id: "alice".into(),
+            },
+            limit: "1.5".into(),
+            nested: Nested {
+                levels: vec![vec![1, 2], vec![], vec![3]],
+            },
+        }
+    }
+
+    #[test]
+    fn escapes_without_schema() {
+        let ctx = assert_same(&escaped(), None).unwrap();
+        assert_eq!(
+            ctx,
+            Context::from_json_value(
+                json!({
+                    "name": "alice",
+                    "owner": { "__entity": { "type": "User", "id": "alice" } },
+                    "limit": { "__extn": { "fn": "decimal", "arg": "1.5" } },
+                    "nested": { "levels": [[1, 2], [], [3]] }
+                }),
+                None
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn escapes_with_schema() {
+        let (schema, action) = (schema(), action());
+        assert_same(&escaped(), Some((&schema, &action))).unwrap();
+    }
+
+    #[test]
+    fn implicit_with_schema() {
+        let (schema, action) = (schema(), action());
+        let ctx = assert_same(&implicit(), Some((&schema, &action))).unwrap();
+        assert_eq!(
+            ctx,
+            assert_same(&escaped(), Some((&schema, &action))).unwrap()
+        );
+    }
+
+    #[test]
+    fn maps_and_empty_record() {
+        let map: BTreeMap<&str, Vec<bool>> =
+            BTreeMap::from([("a", vec![true, false]), ("b", vec![])]);
+        assert_same(&map, None).unwrap();
+        assert_same(&HashMap::<String, i64>::new(), None).unwrap();
+    }
+
+    #[test]
+    fn same_error_for_non_record() {
+        assert_matches!(
+            assert_same(&vec![1, 2, 3], None),
+            Err(ContextJsonError::ContextCreation(_))
+        );
+        assert_matches!(
+            assert_same(&"str", None),
+            Err(ContextJsonError::ContextCreation(_))
+        );
+    }
+
+    #[test]
+    fn same_error_for_schema_mismatch() {
+        let (schema, action) = (schema(), action());
+        #[derive(Serialize)]
+        struct WrongType {
+            name: i64,
+        }
+        assert_matches!(
+            assert_same(&WrongType { name: 1 }, Some((&schema, &action))),
+            Err(ContextJsonError::JsonDeserialization(_))
+        );
+        // Without a schema the implicit form is a plain record, not an
+        // entity reference and a decimal.
+        assert_ne!(
+            assert_same(&implicit(), None).unwrap(),
+            assert_same(&escaped(), None).unwrap()
+        );
+    }
+
+    #[test]
+    fn same_error_for_bad_escapes() {
+        let mut bad_extn = escaped();
+        bad_extn.limit.__extn.arg = "not a decimal".into();
+        assert!(assert_same(&bad_extn, None).is_err());
+        let mut bad_entity = escaped();
+        bad_entity.owner.__entity.ty = "not a type!".into();
+        assert!(assert_same(&bad_entity, None).is_err());
+    }
+
+    #[test]
+    fn same_error_for_missing_action() {
+        let schema = schema();
+        let missing = EntityUid::from_str(r#"Action::"missing""#).unwrap();
+        assert_matches!(
+            assert_same(&escaped(), Some((&schema, &missing))),
+            Err(ContextJsonError::MissingAction(_))
+        );
+    }
+
+    #[test]
+    fn serialization_error() {
+        // `serde_json` cannot serialize a map with non-string keys.
+        let map: BTreeMap<(i64, i64), i64> = BTreeMap::from([((1, 2), 3)]);
+        assert_matches!(
+            assert_same(&map, None),
+            Err(ContextJsonError::JsonDeserialization(
+                entities_json_errors::JsonDeserializationError::Serde(_)
+            ))
+        );
+    }
+}
+
 mod policy_manipulation_functions_tests {
     use std::collections::BTreeMap;
 
