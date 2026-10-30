@@ -5451,6 +5451,39 @@ impl Context {
         Ok(Self(context))
     }
 
+    /// Create a `Context` from any value implementing [`serde::Serialize`]
+    /// (for instance, a Rust struct), which must serialize to a JSON object.
+    ///
+    /// The value must serialize to the same JSON format that
+    /// [`Context::from_json_value`] accepts, including the `__entity` and
+    /// `__extn` escapes, and `schema` is handled the same way. This is
+    /// currently implemented by converting `value` with
+    /// `serde_json::to_value` and calling [`Context::from_json_value`].
+    /// If `value` fails to serialize, the error is reported as
+    /// [`ContextJsonError::JsonDeserialization`].
+    /// ```
+    /// # use cedar_policy::Context;
+    /// #[derive(serde::Serialize)]
+    /// struct MyContext {
+    ///     sub: i64,
+    ///     tags: Vec<String>,
+    /// }
+    /// let ctx = MyContext { sub: 1234, tags: vec!["a".into()] };
+    /// let context = Context::from_serde(&ctx, None).unwrap();
+    /// assert_eq!(
+    ///     context,
+    ///     Context::from_json_value(serde_json::json!({"sub": 1234, "tags": ["a"]}), None).unwrap(),
+    /// );
+    /// ```
+    pub fn from_serde<T: Serialize + ?Sized>(
+        value: &T,
+        schema: Option<(&Schema, &EntityUid)>,
+    ) -> Result<Self, ContextJsonError> {
+        let json = serde_json::to_value(value)
+            .map_err(|e| entities_json_errors::JsonDeserializationError::Serde(e.into()))?;
+        Self::from_json_value(json, schema)
+    }
+
     /// Create a `Context` from a JSON file.  The JSON file must contain a JSON
     /// object, not any other JSON type, or you will get an error here.
     /// JSON here must use the `__entity` and `__extn` escapes for entity

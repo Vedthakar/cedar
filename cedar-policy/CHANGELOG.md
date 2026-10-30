@@ -14,6 +14,11 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
+### Added
+
+- Added `Context::from_serde` to build a `Context` from any `serde::Serialize` value. It gives the same
+  `Context` as `Context::from_json_value` on `serde_json::to_value` of the value (#2265).
+
 ## [4.14.1] - Coming soon
 
 ### Fixed
