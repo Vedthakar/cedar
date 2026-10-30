@@ -14,6 +14,12 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
+### Added
+
+- Added the validation warning `ValidationWarning::InapplicableAction`, reported for each action in an
+  `action in [...]` scope constraint that cannot apply to any principal and resource satisfying the policy
+  scope while other listed actions can (#781).
+
 ## [4.14.1] - Coming soon
 
 ### Fixed

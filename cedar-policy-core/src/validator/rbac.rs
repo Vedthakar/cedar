@@ -291,6 +291,64 @@ impl Validator {
         }
     }
 
+    /// For a template whose action scope is `action in [A1, ..., An]`, warn
+    /// about each `Ai` that (with its descendants) cannot apply to any
+    /// principal and resource type satisfying the principal and resource
+    /// scope constraints. No warning is reported when none of the actions
+    /// apply, since [`Self::validate_template_action_application`] already
+    /// reports that case, or for actions not in the schema, which
+    /// [`Validator::validate_action_ids`] reports.
+    pub(crate) fn validate_template_inapplicable_actions<'a>(
+        &'a self,
+        t: &'a Template,
+    ) -> impl Iterator<Item = ValidationWarning> + 'a {
+        let euids: &[Arc<EntityUID>] = match t.action_constraint() {
+            ActionConstraint::In(euids) if euids.len() > 1 => euids,
+            _ => &[],
+        };
+        let principals: HashSet<&ast::EntityType> = self
+            .get_principals_satisfying_constraint(t.principal_constraint())
+            .collect();
+        let resources: HashSet<&ast::EntityType> = self
+            .get_resources_satisfying_constraint(t.resource_constraint())
+            .collect();
+        let applies = move |euid: &EntityUID| {
+            self.schema
+                .get_actions_in_set(std::iter::once(euid))
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|action_id| self.schema.get_action_id(action_id))
+                .filter_map(|action| action.defined())
+                .any(|defined| {
+                    defined
+                        .applies_to
+                        .applicable_principal_types()
+                        .any(|ty| principals.contains(ty))
+                        && defined
+                            .applies_to
+                            .applicable_resource_types()
+                            .any(|ty| resources.contains(ty))
+                })
+        };
+        // Only actions in the schema; unknown ones are reported as errors.
+        let (applicable, inapplicable): (Vec<&EntityUID>, Vec<&EntityUID>) = euids
+            .iter()
+            .map(Arc::as_ref)
+            .filter(|euid| self.schema.get_action_id(euid).is_some())
+            .partition(|euid| applies(euid));
+        let any_applicable = !applicable.is_empty();
+        inapplicable
+            .into_iter()
+            .filter(move |_| any_applicable)
+            .map(move |euid| {
+                ValidationWarning::inapplicable_action(
+                    t.loc().cloned(),
+                    t.id().clone(),
+                    euid.clone(),
+                )
+            })
+    }
+
     /// Gather all `ApplySpec` objects for all actions in the schema.
     pub(crate) fn get_apply_specs_for_action<'a>(
         &'a self,
@@ -1263,6 +1321,98 @@ mod test {
 
         let validator = Validator::new(schema);
         assert_validate_policy_succeeds(&validator, &policy);
+    }
+
+    /// Schema from issue #781: `View` applies to `User` x `Document` and
+    /// `Invite` applies to `User` x `User`.
+    fn view_invite_schema() -> ValidatorSchema {
+        json_schema::Fragment::from_json_str(
+            r#"
+            {
+                "": {
+                    "entityTypes": {
+                        "User": {},
+                        "Document": {}
+                    },
+                    "actions": {
+                        "View": {
+                            "appliesTo": {
+                                "principalTypes": ["User"],
+                                "resourceTypes": ["Document"]
+                            }
+                        },
+                        "Invite": {
+                            "appliesTo": {
+                                "principalTypes": ["User"],
+                                "resourceTypes": ["User"]
+                            }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .expect("Expected schema parse.")
+        .try_into()
+        .expect("Expected valid schema.")
+    }
+
+    #[test]
+    fn validate_action_in_set_warns_for_inapplicable_action() {
+        let src = r#"permit(principal, action in [Action::"View", Action::"Invite"], resource is Document);"#;
+        let p = parse_policy_or_template(None, src).unwrap();
+        let validator = Validator::new(view_invite_schema());
+        let warnings: Vec<ValidationWarning> = validator
+            .validate_policy(&p, ValidationMode::default())
+            .1
+            .collect();
+        assert_eq!(
+            warnings,
+            vec![ValidationWarning::inapplicable_action(
+                p.loc().cloned(),
+                p.id().clone(),
+                r#"Action::"Invite""#.parse().unwrap(),
+            )],
+        );
+        expect_err(
+            src,
+            &Report::new(warnings[0].clone()),
+            &ExpectedErrorMessageBuilder::error(
+                r#"for policy `policy0`, action `Action::"Invite"` cannot be applied to any principal and resource satisfying the policy scope constraints"#,
+            )
+            .help("remove the action from the action scope, or check the `appliesTo` of the action in the schema")
+            .exactly_one_underline(src)
+            .build(),
+        );
+    }
+
+    #[test]
+    fn validate_action_in_set_no_warning_when_all_apply() {
+        let src =
+            r#"permit(principal is User, action in [Action::"View", Action::"Invite"], resource);"#;
+        let p = parse_policy_or_template(None, src).unwrap();
+        let validator = Validator::new(view_invite_schema());
+        assert_validate_policy_succeeds(&validator, &p);
+    }
+
+    #[test]
+    fn validate_action_in_set_none_apply_only_reports_invalid_application() {
+        let src = r#"permit(principal is Document, action in [Action::"View", Action::"Invite"], resource);"#;
+        let p = parse_policy_or_template(None, src).unwrap();
+        let validator = Validator::new(view_invite_schema());
+        let warnings: Vec<ValidationWarning> = validator
+            .validate_policy(&p, ValidationMode::default())
+            .1
+            .filter(|w| !matches!(w, ValidationWarning::ImpossiblePolicy(_)))
+            .collect();
+        assert_eq!(
+            warnings,
+            vec![ValidationWarning::invalid_action_application(
+                p.loc().cloned(),
+                p.id().clone(),
+                false,
+                false,
+            )],
+        );
     }
 
     #[test]

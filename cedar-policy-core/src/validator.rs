@@ -212,14 +212,22 @@ impl Validator {
                 // schema if it only warned when there is a known action
                 // applied to known principal/resource entity types that are
                 // not in its `appliesTo`.
-                self.validate_template_action_application(p).err(),
+                Some(
+                    self.validate_template_action_application(p)
+                        .err()
+                        .into_iter()
+                        .chain(self.validate_template_inapplicable_actions(p)),
+                ),
             )
         };
         let validation_errors = validation_errors.into_iter().flatten();
         let (errors, warnings) = self.typecheck_policy(p, mode);
         (
             validation_errors.chain(errors),
-            action_application_warning.into_iter().chain(warnings),
+            action_application_warning
+                .into_iter()
+                .flatten()
+                .chain(warnings),
         )
     }
 
