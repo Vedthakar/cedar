@@ -666,8 +666,9 @@ pub struct PartialAuthorizationCall {
     action: Option<EntityUid>,
     /// The resource being acted on by the principal. If this field is empty, then the resource is unknown.
     resource: Option<EntityUid>,
-    /// The context details specific to the request
-    context: Context,
+    /// The context details specific to the request. If this field is empty, then the context is unknown.
+    #[cfg_attr(feature = "wasm", tsify(optional))]
+    context: Option<Context>,
     /// Optional schema.
     /// If present, this will inform the parsing: for instance, it will allow
     /// `__entity` and `__extn` escapes to be implicit, and it will error if
@@ -954,7 +955,11 @@ impl PartialAuthorizationCall {
             return build_error(errs, warnings);
         };
 
-        let context = match self.context.parse(schema.as_ref(), action.as_ref()) {
+        let context = match self
+            .context
+            .map(|context| context.parse(schema.as_ref(), action.as_ref()))
+            .transpose()
+        {
             Ok(context) => context,
             Err(e) => {
                 return build_error(vec![e], warnings);
@@ -977,7 +982,9 @@ impl PartialAuthorizationCall {
         if let Some(r) = resource {
             b = b.resource(r);
         }
-        b = b.context(context);
+        if let Some(c) = context {
+            b = b.context(c);
+        }
 
         let maybe_request = match schema {
             Some(schema) if self.validate_request => {
@@ -2265,5 +2272,86 @@ mod partial_test {
         });
 
         assert_is_residual(call, &HashSet::from(["ID1"]));
+    }
+
+    /// A partial call for `User::"alice"` viewing `Photo::"door"` with a policy
+    /// that reads the context, with the given `context` (left out when `None`)
+    /// and optionally a schema declaring `context: { flag: Bool }`
+    /// (cedar-java#376).
+    fn context_call(context: Option<serde_json::Value>, schema: bool) -> serde_json::Value {
+        let mut call = json!({
+            "principal": { "type": "User", "id": "alice" },
+            "action": { "type": "Action", "id": "view" },
+            "resource": { "type": "Photo", "id": "door" },
+            "policies": {
+                "staticPolicies": {
+                    "ID1": "permit(principal, action, resource) when { context.flag };"
+                }
+            },
+            "entities": []
+        });
+        if let Some(context) = context {
+            call["context"] = context;
+        }
+        if schema {
+            call["schema"] = json!(
+                "entity User, Photo; action view appliesTo { principal: User, resource: Photo, context: { flag: Bool } };"
+            );
+        }
+        call
+    }
+
+    #[test]
+    fn test_partial_omitted_context_is_unknown() {
+        assert_is_residual(context_call(None, false), &HashSet::from(["ID1"]));
+    }
+
+    #[test]
+    fn test_partial_omitted_context_is_unknown_with_schema() {
+        assert_is_residual(context_call(None, true), &HashSet::from(["ID1"]));
+    }
+
+    #[test]
+    fn test_partial_null_context_is_unknown() {
+        assert_is_residual(
+            context_call(Some(serde_json::Value::Null), false),
+            &HashSet::from(["ID1"]),
+        );
+    }
+
+    #[test]
+    fn test_partial_empty_context_is_known() {
+        // `{}` is a known, empty context: `context.flag` is an error, not a
+        // residual, as before.
+        let ans_val = is_authorized_partial_json(context_call(Some(json!({})), false)).unwrap();
+        let result: Result<PartialAuthorizationAnswer, _> = serde_json::from_value(ans_val);
+        assert_matches!(result, Ok(PartialAuthorizationAnswer::Residuals { response, .. }) => {
+            assert_eq!(response.decision(), Some(Decision::Deny));
+            assert_eq!(response.nontrivial_residual_ids().count(), 0);
+            assert_eq!(response.errored().count(), 1);
+        });
+    }
+
+    #[test]
+    fn test_partial_empty_context_is_known_with_schema() {
+        // With the schema, `{}` lacks the required `flag`: request validation
+        // fails, as before.
+        let ans_val = is_authorized_partial_json(context_call(Some(json!({})), true)).unwrap();
+        let result: Result<PartialAuthorizationAnswer, _> = serde_json::from_value(ans_val);
+        assert_matches!(result, Ok(PartialAuthorizationAnswer::Failure { .. }));
+    }
+
+    #[test]
+    fn test_partial_populated_context() {
+        assert_is_authorized_json_partial(context_call(Some(json!({ "flag": true })), false));
+        assert_is_authorized_json_partial(context_call(Some(json!({ "flag": true })), true));
+    }
+
+    #[test]
+    fn test_concrete_call_still_requires_context() {
+        // The concrete call is unchanged: `context` is still required.
+        assert_matches!(is_authorized_json(context_call(None, false)), Err(e) => {
+            assert!(e.to_string().contains("missing field `context`"), "{e}");
+        });
     }
 }

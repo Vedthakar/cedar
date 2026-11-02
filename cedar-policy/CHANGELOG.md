@@ -14,6 +14,14 @@ Starting with version 3.2.4, changes marked with a star (*) are _language breaki
 
 Cedar Language Version: TBD
 
+### Fixed
+
+- For the experimental `partial-eval` feature, the partial authorization FFI (`is_authorized_partial`,
+  `PartialAuthorizationCall`) now accepts a call without `context` (or with `"context": null`) and treats the
+  context as unknown, as it already does for a missing principal, action or resource. An explicit `{}` is still a
+  known, empty context. In the wasm TypeScript types, the `context` field of `PartialAuthorizationCall` is now
+  optional (cedar-policy/cedar-java#376).
+
 ## [4.14.1] - Coming soon
 
 ### Fixed
