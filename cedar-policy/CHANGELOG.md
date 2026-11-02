@@ -16,9 +16,11 @@ Cedar Language Version: TBD
 
 ### Fixed
 
-- The partial authorization FFI (`is_authorized_partial`, `PartialAuthorizationCall`) now accepts a call
-  without `context` and treats the context as unknown, as it already does for a missing principal, action or
-  resource. An explicit `{}` is still a known, empty context (cedar-policy/cedar-java#376).
+- For the experimental `partial-eval` feature, the partial authorization FFI (`is_authorized_partial`,
+  `PartialAuthorizationCall`) now accepts a call without `context` (or with `"context": null`) and treats the
+  context as unknown, as it already does for a missing principal, action or resource. An explicit `{}` is still a
+  known, empty context. In the wasm TypeScript types, the `context` field of `PartialAuthorizationCall` is now
+  optional (cedar-policy/cedar-java#376).
 
 ## [4.14.1] - Coming soon
 

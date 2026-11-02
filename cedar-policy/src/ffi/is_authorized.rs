@@ -2312,6 +2312,14 @@ mod partial_test {
     }
 
     #[test]
+    fn test_partial_null_context_is_unknown() {
+        assert_is_residual(
+            context_call(Some(serde_json::Value::Null), false),
+            &HashSet::from(["ID1"]),
+        );
+    }
+
+    #[test]
     fn test_partial_empty_context_is_known() {
         // `{}` is a known, empty context: `context.flag` is an error, not a
         // residual, as before.
