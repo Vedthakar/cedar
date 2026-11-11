@@ -220,43 +220,29 @@ fn cyclic_tc_internal<K, V>(
     K: Clone + Eq + Hash + Debug,
     V: TCNode<K>,
 {
-    let node_order = order_visited.len();
-    // when was the root of this node's component visited?
-    // initially the root of this node's component is this node itself
-    // keeping track in auxillary function to avoid re-fetching in a loop
-    let mut root_order = node_order;
-    order_visited.insert(node_id.clone(), node_order);
-    root.insert(node_id.clone(), node_id.clone());
-    vstack.push(node_id.clone());
-    let height = cstack.len();
-    let mut self_loop = false;
-    let out_edges = match nodes.get(node_id) {
-        Some(node) => node.out_edges().collect(),
-        None => Vec::new(),
-    };
-    for parent_id in out_edges {
-        if node_id == parent_id {
-            self_loop = true;
-        } else {
-            // The edge from node_id to parent_id is a forward edge iff
-            // node_id is visited before parent_id and we do not visit
-            // parent_id from node_id (i.e., we do not recursively call
-            // cyclic_tc_internal on parent_id from this call).
-            let mut maybe_forward_edge = true;
-            if !order_visited.contains_key(parent_id) {
-                maybe_forward_edge = false;
-                cyclic_tc_internal(
-                    parent_id,
-                    nodes,
-                    order_visited,
-                    root,
-                    vstack,
-                    cstack,
-                    component,
-                    comp_succ,
-                    comp_elts,
-                );
-            }
+    // The depth-first search uses an explicit stack of the nodes being
+    // visited rather than recursion, so that a long chain of ancestors cannot
+    // overflow the call stack (#2660).
+    let mut stack = vec![CyclicTcFrame::visit(
+        node_id,
+        nodes,
+        order_visited,
+        root,
+        vstack,
+        cstack,
+    )];
+    while let Some(frame) = stack.last_mut() {
+        let CyclicTcFrame {
+            node_id,
+            node_order,
+            root_order,
+            out_edges,
+            pending_parent,
+            ..
+        } = frame;
+        let node_id: &K = node_id;
+        let node_order = *node_order;
+        if let Some((parent_id, maybe_forward_edge)) = pending_parent.take() {
             match component.get(parent_id) {
                 None => {
                     #[expect(
@@ -273,8 +259,8 @@ fn cyclic_tc_internal<K, V>(
                     let parent_root_order = order_visited
                         .get(parent_root)
                         .expect("The parent's root must have been visited.");
-                    if *parent_root_order < root_order {
-                        root_order = *parent_root_order;
+                    if *parent_root_order < *root_order {
+                        *root_order = *parent_root_order;
                         root.insert(node_id.clone(), parent_root.clone());
                     }
                 }
@@ -292,67 +278,190 @@ fn cyclic_tc_internal<K, V>(
                     }
                 }
             }
+            continue;
         }
-    } // end for loop over parents
-    #[expect(
-        clippy::expect_used,
-        reason = "`node_id` must have a root. It was inserted at the begining of this function"
-    )]
-    let node_root = root
-        .get(node_id)
-        .expect("Node must have a root by this point.");
-    // if this node is the root of its connected component
-    if node_id == node_root {
-        let component_id = comp_elts.len();
-        let mut succ = HashSet::new();
-        let mut elmts = HashSet::new();
-        #[expect(
-            clippy::expect_used,
-            reason = " The vertex stack must not be empty because at least node_id must be on the stack!"
-        )]
-        if self_loop || vstack.last().expect("vertex stack must be non-empty") != node_id {
-            succ.insert(component_id);
-        }
-        let mut cstack_tail = cstack.split_off(height);
-        // sort by topological order of the components, which should be equivalent to the reverse order of their ids
-        // cstack_tail are all of the components reachable (1 step) from any node within this component
-        cstack_tail.sort_by(|a, b| b.cmp(a));
-        // iterate through components in topological order
-        for i in 0..cstack_tail.len() {
-            // update this component's successors with next component avoiding duplicate components
-            #[expect(
-                clippy::indexing_slicing,
-                reason = "both `i` and `i - 1` are guaranteed to be valid indices into `cstack_tail`."
-            )]
-            if i == 0 || cstack_tail[i - 1] != cstack_tail[i] {
+        match out_edges.next() {
+            Some(parent_id) if node_id == parent_id => frame.self_loop = true,
+            Some(parent_id) => {
+                // The edge from node_id to parent_id is a forward edge iff
+                // node_id is visited before parent_id and we do not visit
+                // parent_id from node_id (i.e., we do not push parent_id onto
+                // the stack from node_id).
+                if order_visited.contains_key(parent_id) {
+                    frame.pending_parent = Some((parent_id, true));
+                } else {
+                    frame.pending_parent = Some((parent_id, false));
+                    stack.push(CyclicTcFrame::visit(
+                        parent_id,
+                        nodes,
+                        order_visited,
+                        root,
+                        vstack,
+                        cstack,
+                    ));
+                }
+            }
+            None => {
                 #[expect(
-                    clippy::indexing_slicing,
-                    reason = "`i` is a valid index into `cstack_tail`."
+                    clippy::expect_used,
+                    reason = "the stack is non-empty because `frame` is its last element"
                 )]
-                let tail_elt = cstack_tail[i];
-                if succ.insert(tail_elt) {
+                let CyclicTcFrame {
+                    node_id,
+                    height,
+                    self_loop,
+                    ..
+                } = stack.pop().expect("stack should be non-empty");
+                let node_id = &node_id;
+                #[expect(
+                    clippy::expect_used,
+                    reason = "`node_id` must have a root. It was inserted at the begining of this function"
+                )]
+                let node_root = root
+                    .get(node_id)
+                    .expect("Node must have a root by this point.");
+                // if this node is the root of its connected component
+                if node_id == node_root {
+                    let component_id = comp_elts.len();
+                    let mut succ = HashSet::new();
+                    let mut elmts = HashSet::new();
                     #[expect(
-                        clippy::indexing_slicing,
-                        reason = "`tail_elt` is a component id created by a previous call to `cyclic_tc_internal` and thus must be a valid index to `comp_succ`."
+                        clippy::expect_used,
+                        reason = " The vertex stack must not be empty because at least node_id must be on the stack!"
                     )]
-                    succ.extend(comp_succ[tail_elt].clone());
+                    if self_loop
+                        || vstack.last().expect("vertex stack must be non-empty") != node_id
+                    {
+                        succ.insert(component_id);
+                    }
+                    let mut cstack_tail = cstack.split_off(height);
+                    // sort by topological order of the components, which should be equivalent to the reverse order of their ids
+                    // cstack_tail are all of the components reachable (1 step) from any node within this component
+                    cstack_tail.sort_by(|a, b| b.cmp(a));
+                    // iterate through components in topological order
+                    for i in 0..cstack_tail.len() {
+                        // update this component's successors with next component avoiding duplicate components
+                        #[expect(
+                            clippy::indexing_slicing,
+                            reason = "both `i` and `i - 1` are guaranteed to be valid indices into `cstack_tail`."
+                        )]
+                        if i == 0 || cstack_tail[i - 1] != cstack_tail[i] {
+                            #[expect(
+                                clippy::indexing_slicing,
+                                reason = "`i` is a valid index into `cstack_tail`."
+                            )]
+                            let tail_elt = cstack_tail[i];
+                            if succ.insert(tail_elt) {
+                                #[expect(
+                                    clippy::indexing_slicing,
+                                    reason = "`tail_elt` is a component id created by a previous call to `cyclic_tc_internal` and thus must be a valid index to `comp_succ`."
+                                )]
+                                succ.extend(comp_succ[tail_elt].clone());
+                            }
+                        }
+                    }
+                    loop {
+                        #[expect(
+                            clippy::expect_used,
+                            reason = "The vertex stack `vstack` must contain at least `node_id`"
+                        )]
+                        let ancestor_id = vstack.pop().expect("Vetex stack must be non-empty");
+                        component.insert(ancestor_id.clone(), component_id);
+                        elmts.insert(ancestor_id.clone());
+                        if *node_id == ancestor_id {
+                            break;
+                        }
+                    }
+                    comp_succ.push(succ);
+                    comp_elts.push(elmts);
                 }
             }
         }
-        loop {
-            #[expect(
-                clippy::expect_used,
-                reason = "The vertex stack `vstack` must contain at least `node_id`"
-            )]
-            let ancestor_id = vstack.pop().expect("Vetex stack must be non-empty");
-            component.insert(ancestor_id.clone(), component_id);
-            elmts.insert(ancestor_id.clone());
-            if *node_id == ancestor_id {
-                break;
-            }
+    }
+}
+
+/// A node that [`cyclic_tc_internal`] is visiting.
+struct CyclicTcFrame<'a, K> {
+    node_id: K,
+    /// When the node was visited
+    node_order: usize,
+    /// When the root of this node's component was visited.
+    /// Initially the root of this node's component is this node itself.
+    /// Keeping track here avoids re-fetching it in a loop.
+    root_order: usize,
+    /// The height of `cstack` when the node was visited
+    height: usize,
+    self_loop: bool,
+    /// The parents left to visit
+    out_edges: std::vec::IntoIter<&'a K>,
+    /// The parent just visited, and whether the edge to it may be a forward edge
+    pending_parent: Option<(&'a K, bool)>,
+}
+
+impl<'a, K> CyclicTcFrame<'a, K>
+where
+    K: Clone + Eq + Hash,
+{
+    /// Start visiting `node_id`
+    fn visit<V: TCNode<K>>(
+        node_id: &K,
+        nodes: &'a HashMap<K, V>,
+        order_visited: &mut HashMap<K, usize>,
+        root: &mut HashMap<K, K>,
+        vstack: &mut Vec<K>,
+        cstack: &[usize],
+    ) -> Self {
+        let node_order = order_visited.len();
+        order_visited.insert(node_id.clone(), node_order);
+        root.insert(node_id.clone(), node_id.clone());
+        vstack.push(node_id.clone());
+        let out_edges: Vec<&'a K> = match nodes.get(node_id) {
+            Some(node) => node.out_edges().collect(),
+            None => Vec::new(),
+        };
+        Self {
+            node_id: node_id.clone(),
+            node_order,
+            root_order: node_order,
+            height: cstack.len(),
+            self_loop: false,
+            out_edges: out_edges.into_iter(),
+            pending_parent: None,
         }
-        comp_succ.push(succ);
-        comp_elts.push(elmts);
+    }
+}
+
+/// One node whose ancestors [`add_ancestors`] is still visiting.
+struct AddAncestorsFrame<K> {
+    node_id: K,
+    /// The node's out-going edges, in the order they are visited
+    out_edges: std::vec::IntoIter<K>,
+    /// The out-going edge being visited, and whether its own ancestors have
+    /// already been saturated (or did not need to be)
+    current: Option<(K, bool)>,
+    /// The ancestors to add to the node once all out-going edges are visited
+    ancestors: HashSet<K>,
+    /// Track which ancestors we have already read out_edges from, to avoid
+    /// redundant work. This is distinct from `ancestors` because an ancestor_id
+    /// may appear in `ancestors` (added via some other node's out_edges) before
+    /// we have actually read *its* out_edges.
+    explored: HashSet<K>,
+}
+
+impl<K: Clone> AddAncestorsFrame<K> {
+    /// The frame for `node_id`, or `None` if it isn't in `nodes`
+    fn new<V: TCNode<K>>(node_id: &K, nodes: &HashMap<K, V>) -> Option<Self>
+    where
+        K: Eq + Hash,
+    {
+        let out_edges: Vec<K> = nodes.get(node_id)?.out_edges().map(K::clone).collect();
+        Some(Self {
+            node_id: node_id.clone(),
+            out_edges: out_edges.into_iter(),
+            current: None,
+            ancestors: HashSet::new(),
+            explored: HashSet::new(),
+        })
     }
 }
 
@@ -360,48 +469,62 @@ fn cyclic_tc_internal<K, V>(
 /// represented by `nodes` assuming that each node appearing in `seen` already satisfies
 /// this property. The process works by performing a depth-first search over the ancestors
 /// of `node_id` (and stopping if any ancestor is already in the `seen` set).
+///
+/// The search uses an explicit stack rather than recursion, so that a long chain of
+/// ancestors cannot overflow the call stack (#2660).
 fn add_ancestors<K, V>(node_id: &K, nodes: &mut HashMap<K, V>, seen: &mut HashSet<K>)
 where
     K: Clone + Eq + Hash,
     V: TCNode<K>,
 {
-    let mut ancestors: HashSet<K> = HashSet::new();
-    // Track which ancestors we have already read out_edges from, to avoid
-    // redundant work. This is distinct from `ancestors` because an ancestor_id
-    // may appear in `ancestors` (added via some other node's out_edges) before
-    // we have actually read *its* out_edges.
-    let mut explored: HashSet<K> = HashSet::new();
-    let out_edges: Vec<K> = match nodes.get(node_id) {
-        Some(node) => node.out_edges().map(K::clone).collect(),
+    let mut stack: Vec<AddAncestorsFrame<K>> = match AddAncestorsFrame::new(node_id, nodes) {
+        Some(frame) => vec![frame],
         None => return,
     };
-    for ancestor_id in out_edges {
-        if seen.insert(ancestor_id.clone()) {
-            add_ancestors(&ancestor_id, nodes, seen);
+    while let Some(frame) = stack.last_mut() {
+        let (ancestor_id, saturated) = match frame.current.take() {
+            Some(current) => current,
+            None => match frame.out_edges.next() {
+                Some(ancestor_id) => (ancestor_id, false),
+                None => {
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "the stack is non-empty because `frame` is its last element"
+                    )]
+                    let frame = stack.pop().expect("stack should be non-empty");
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "this node should always exist because of the check to get `out_edges`"
+                    )]
+                    let node = nodes
+                        .get_mut(&frame.node_id)
+                        .expect("This node should always exist.");
+                    // Do the actual saturation of out-going edges of `node` here to avoid
+                    // issues with rust's borrow checker.
+                    for ancestor_id in frame.ancestors {
+                        node.add_edge_to(ancestor_id);
+                    }
+                    continue;
+                }
+            },
+        };
+        if !saturated && seen.insert(ancestor_id.clone()) {
+            // Saturate the ancestor first, then come back to it
+            frame.current = Some((ancestor_id.clone(), true));
+            if let Some(ancestor_frame) = AddAncestorsFrame::new(&ancestor_id, nodes) {
+                stack.push(ancestor_frame);
+            }
+            continue;
         }
         // Only skip reading out_edges if we already explored this exact
         // ancestor in a previous iteration of this loop.
-        if explored.insert(ancestor_id.clone()) {
-            let ancestor = match nodes.get(&ancestor_id) {
-                Some(ancestor) => ancestor,
-                None => continue,
-            };
-            for grand_ancestor_id in ancestor.out_edges() {
-                ancestors.insert(grand_ancestor_id.clone());
+        if frame.explored.insert(ancestor_id.clone()) {
+            if let Some(ancestor) = nodes.get(&ancestor_id) {
+                for grand_ancestor_id in ancestor.out_edges() {
+                    frame.ancestors.insert(grand_ancestor_id.clone());
+                }
             }
         }
-    }
-    #[expect(
-        clippy::expect_used,
-        reason = "this node should always exist because of the check to get `out_edges`"
-    )]
-    let node = nodes
-        .get_mut(node_id)
-        .expect("This node should always exist.");
-    // Do the actual saturation of out-going edges of `node` here to avoid
-    // issues with rust's borrow checker.
-    for ancestor_id in ancestors {
-        node.add_edge_to(ancestor_id);
     }
 }
 
@@ -495,6 +618,69 @@ mod tests {
     use crate::ast::{Entity, EntityUID};
 
     use super::*;
+
+    /// The chain `E0 -> E1 -> ... -> E{len - 1}`
+    fn chain(len: usize) -> HashMap<EntityUID, Entity> {
+        (0..len)
+            .map(|i| {
+                let mut entity = Entity::with_uid(EntityUID::with_eid(&format!("E{i}")));
+                if i + 1 < len {
+                    entity.add_parent(EntityUID::with_eid(&format!("E{}", i + 1)));
+                }
+                (entity.uid().clone(), entity)
+            })
+            .collect()
+    }
+
+    /// Run `f` on a thread with a small stack, so that recursing once per
+    /// ancestor of a few thousand long chain overflows it (#2660)
+    fn with_small_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(f)
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    const LONG_CHAIN: usize = 1000;
+
+    #[test]
+    fn compute_tc_long_chain() {
+        let entities = with_small_stack(|| {
+            let mut entities = chain(LONG_CHAIN);
+            compute_tc(&mut entities, true).expect("Failed to compute transitive closure");
+            entities
+        });
+        let first = &entities[&EntityUID::with_eid("E0")];
+        assert_eq!(first.ancestors().count(), LONG_CHAIN - 1);
+    }
+
+    #[test]
+    fn compute_tc_long_cycle() {
+        // The same chain, closed into a cycle by `E{len - 1} -> E0`
+        let result = with_small_stack(|| {
+            let mut entities = chain(LONG_CHAIN);
+            entities
+                .get_mut(&EntityUID::with_eid(&format!("E{}", LONG_CHAIN - 1)))
+                .unwrap()
+                .add_parent(EntityUID::with_eid("E0"));
+            compute_tc(&mut entities, true)
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repair_tc_long_chain() {
+        let entities = with_small_stack(|| {
+            let mut entities = chain(LONG_CHAIN);
+            let to_fix = entities.keys().cloned().collect();
+            repair_tc(&to_fix, &mut entities, false).expect("Failed to repair transitive closure");
+            entities
+        });
+        let first = &entities[&EntityUID::with_eid("E0")];
+        assert_eq!(first.ancestors().count(), LONG_CHAIN - 1);
+    }
 
     #[test]
     fn basic() {
